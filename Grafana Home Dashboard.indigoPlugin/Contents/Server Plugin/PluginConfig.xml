@@ -211,7 +211,7 @@
 </Field>		
 
 	<Field id="ExcDevsInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>Devices to exclude.  Good to exclude any devices that you will not analyize and that have frequently changing states that match the previous criteria.</Label>
+		<Label>Devices to exclude.  Good to exclude any devices that you will not analyize and that have frequently changing states that match the previous criteria.  Hold the Command or Shift key to select multiple items.</Label>
 	</Field>
 
 		<Field type="list" id="listExclDevices" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="" rows="12" alwaysUseInDialogHeightCalc="true">

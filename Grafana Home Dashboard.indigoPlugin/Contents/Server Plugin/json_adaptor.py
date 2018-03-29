@@ -178,7 +178,7 @@ class JSONAdaptor():
 					if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 						diffjson[kk] = vv
 
-						if self.TransportDebug:
+						if self.TransportDebugL2:
 							self.logger.debug('sending property: ' + kk + " to InfluxDB for device: " + device.name)
 
 						hasUpdate = True

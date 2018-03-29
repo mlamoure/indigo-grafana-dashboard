@@ -20,7 +20,9 @@ import socket
 import signal
 
 DEFAULT_POLLING_INTERVAL = 60  # number of seconds between each poll
-DEFAULT_STATES = ["state.onOffState", "state.hvac_state", "onState", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "state.batteryLevel"]
+UPDATE_STATES_LIST = 15 # how frequently (in minutes) to update the state list
+
+DEFAULT_STATES = ["state.onOffState", "state.hvac_state", "onState", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
 class Plugin(indigo.PluginBase):
 	def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
@@ -56,6 +58,8 @@ class Plugin(indigo.PluginBase):
 		self.GrafanaServerStatus = "stopped"
 		self.influxConfigFileLoc = os.getcwd() + '/servers/influxdb/influxdb.conf'
 		self.GrafanaConfigFileLoc = os.getcwd() + '/servers/grafana/conf/indigo.ini'
+
+		self.LastConfigRefresh = datetime.datetime.now()
 
 	def startup(self):
 		try:
@@ -100,7 +104,7 @@ class Plugin(indigo.PluginBase):
 
 		self.restartAll()
 		self.BuildConfigurationLists()
-		self.updateAll()
+		self.UpdateAll()
 
 	# called after runConcurrentThread() exits
 	def shutdown(self):
@@ -196,6 +200,7 @@ class Plugin(indigo.PluginBase):
 
 	def runConcurrentThread(self):
 		self.logger.debug("starting concurrent tread...")
+		indigo.server.log("fully initialized and ready...")
 		self.sleep(int(self.pollingInterval))
 
 		try:
@@ -242,7 +247,7 @@ class Plugin(indigo.PluginBase):
 						self.connect()
 
 					if self.connected:
-						self.updateAll()
+						self.UpdateAll()
 
 				except Exception as e:
 					if self.debug:
@@ -259,25 +264,28 @@ class Plugin(indigo.PluginBase):
 			self.StopInfluxServer()
 			self.StopGrafanaServer()
 
-	def updateAll(self):
+	def UpdateAll(self):
 
 		if not self.connected:
 			return
 
-		self.logger.debug("running updateAll()")
+		self.logger.debug("running UpdateAll()")
 
 		for dev in indigo.devices:
 			needsUpdating = False
 			found = False
 
+			if self.TransportDebugL2:
+				self.logger.debug("reviewing " + dev.name)
+
 			# if the device is excluded, do nothing
 			if dev.id in self.DeviceExcludeList:
 				if self.TransportDebug:
 					self.logger.debug("device was excluded from InfluxDB update: " + dev.name)
-				break
+				continue
 
 			for devSearch in self.DeviceLastUpdatedList:
-				if devSearch[0] == dev.name:
+				if devSearch[0] == dev.id:
 					found = True
 
 					if devSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now():
@@ -290,10 +298,11 @@ class Plugin(indigo.PluginBase):
 					break
 
 			if not found:
-				self.DeviceLastUpdatedList.append([dev.name, dev.lastChanged])
+				self.DeviceLastUpdatedList.append([dev.id, dev.lastChanged])
 
-			if self.TransportDebugL2:
-				self.logger.debug("reviewing " + dev.name)
+				if datetime.datetime.now() + datetime.timedelta(minutes=UPDATE_STATES_LIST) < self.LastConfigRefresh:
+					self.logger.debug("updating the states cache as it has gone stale")
+					self.BuildConfigurationLists()
 
 			if needsUpdating:
 				self.DeviceToInflux(dev, False)
@@ -303,7 +312,7 @@ class Plugin(indigo.PluginBase):
 			found = False
 
 			for varSearch in self.VariableLastUpdatedList:
-				if varSearch[0] == var.name:
+				if varSearch[0] == var.id:
 					found = True
 
 					if varSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now():
@@ -316,12 +325,12 @@ class Plugin(indigo.PluginBase):
 					break
 
 			if not found:
-				self.VariableLastUpdatedList.append([var.name, datetime.datetime.now()])
+				self.VariableLastUpdatedList.append([var.id, datetime.datetime.now()])
 
 			if needsUpdating:
 				self.VariableToInflux(var)
 
-		self.logger.debug("completed updateAll()")
+		self.logger.debug("completed UpdateAll()")
 
 	def deviceUpdated(self, origDev, newDev):
 		# call base implementation
@@ -814,7 +823,12 @@ class Plugin(indigo.PluginBase):
 			if self.ExternalDB and InfluxServerChanged:
 				self.connect()
 
-			self.miniumumUpdateFrequency = valuesDict["MinimumUpdateFrequency"]
+			self.miniumumUpdateFrequency = int(valuesDict["MinimumUpdateFrequency"])
+
+			# Reset the Exclude List to the selected devices that are selected in the list box
+			self.DeviceExcludeList = []
+			for dev in valuesDict["listExclDevices"]:
+				self.DeviceExcludeList.append(int(dev))
 
 			self.pluginPrefs["listIncStates"] = self.StatesIncludeList
 			self.pluginPrefs["listIncDevices"] = self.DeviceIncludeList
@@ -828,6 +842,8 @@ class Plugin(indigo.PluginBase):
 			return
 
 		self.logger.debug("starting BuildConfigurationLists()")
+
+		self.LastConfigRefresh = datetime.datetime.now()
 
 		for dev in indigo.devices:
 			### STATES List
@@ -858,6 +874,7 @@ class Plugin(indigo.PluginBase):
 			if not ui[0] in self.StatesIncludeList:
 				self.AvailableStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 
+		# Rebuild the UI lists for Include and Exclude to be ready for use with the config dialog
 		self.DeviceIncludeListUI = []
 
 		for item in self.DeviceIncludeList:
@@ -906,14 +923,14 @@ class Plugin(indigo.PluginBase):
 
 	def AddDeviceToIncludedDeviceList(self, valuesDict, typeId="", devId=0):
 		self.DeviceIncludeList.append(int(valuesDict["menuAvailableDevices"]))
-		self.DeviceIncludeListUI.append((valuesDict["menuAvailableDevices"], indigo.devices[valuesDict["menuAvailableDevices"]].name))
+		self.DeviceIncludeListUI.append((valuesDict["menuAvailableDevices"], indigo.devices[int(valuesDict["menuAvailableDevices"])].name))
 
 		for item in self.AvailableIncDevices:
-			if item[0] == valuesDict["menuAvailableDevices"]:
+			if item[0] == int(valuesDict["menuAvailableDevices"]):
 				self.AvailableIncDevices.remove(item)
 
 		for item in self.AvailableExlDevices:
-			if item[0] == valuesDict["menuAvailableDevices"]:
+			if item[0] == int(valuesDict["menuAvailableDevices"]):
 				self.AvailableExlDevices.remove(item)
 
 		return valuesDict
@@ -964,12 +981,24 @@ class Plugin(indigo.PluginBase):
 
 	def PrintDeviceToEventLog(self, valuesDict, typeId=0, devId=0):
 		dev = indigo.devices[int(valuesDict["menuDevice"])]
-		newjson = self.adaptor.diff_to_json(dev, [], False)
 
-		indigo.server.log("JSON representation of device " + dev.name + ":")
+		if dev.id in self.DeviceExcludeList:
+			indigo.server.log("Device \"" + dev.name + "\" is EXCLUDED and would never be sent to InfluxDB")
+			return valuesDict
 
-		for kk, vv in newjson.iteritems():
-			indigo.server.log("   " + str(kk) + ": " + str(vv))
+		if dev.id in self.DeviceIncludeList:
+			indigo.server.log("JSON representation (ALL STATES) of device " + dev.name + ":")
+			newjson = self.adaptor.diff_to_json(dev, [], False)
+		else:
+			indigo.server.log("JSON representation (INCLUDED STATES ONLY!) of device " + dev.name + ":")
+			newjson = self.adaptor.diff_to_json(dev, self.StatesIncludeList, False)
+
+		if newjson is None:
+			indigo.server.log("   the device: \"" + dev.name + "\" is not excluded from updates to InfluxDB, but it contains no states/properties that are cofigured to be sent to Influx/Grafana.")			
+
+		else:
+			for kk, vv in newjson.iteritems():
+				indigo.server.log("   " + str(kk) + ": " + str(vv))
 
 		return valuesDict
 
