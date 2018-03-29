@@ -1,0 +1,247 @@
+<?xml version="1.0"?>
+<PluginConfig>
+		<!-- You can add a SupportURL element inside here if you want a context
+				 sensitive help link on the config UI - otherwise it will just link
+				 to the URL specified in the AboutInformation element. -->
+		<SupportURL>https://github.com/mlamoure/indigo-grafana-dashboard/wiki/Indigo-Grafana-Dashboard-Documentation</SupportURL>
+
+		<Field type="menu" id="listConfigurationSelector" defaultValue="server">
+			<Label>Configure:</Label>
+			<List>
+				<Option value="server">Server configuration</Option>
+				<Option value="device">Device Inclusion / Exclusion Criteria</Option>
+			</List>
+		</Field>			
+
+
+	<Field id="DirectoriesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>The two fields below specify where your Influx data and Grafana Dashboards will be stored on your Mac.  The InfluxDB Data Location should be on a Volume that has adequate storage.  These are the only required configuration values for this plugin to initially work unless you have a advanced configuration.  These directories must exist for the plugin to start up correctly.
+
+		InfluxDB Data Location: Influx is a time series database that will store your device log history so that it can be visualized in Grafana.  Depending on the configuration of this plugin, InfluxDB may archive 2-3GB of data per year (or more), based on how many devices you choose to send to InfluxDB (configuratble via the inclusion/exclusion plugin config dialog) and the data retention policy.  See the wiki document for more information.
+
+		Grafana Data Location: Grafana does not store very much data.  It will keep any customizations to your dashboard in this location and minimal logs.
+		</Label>
+	</Field>
+
+		<Field id="InfluxDataLocation" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="/Users/yourusername/Documents/InfluxDB" tooltip="location for the data files for InfluxDB" enabledBindingId="ExternalDB" enabledBindingNegate="true">
+				<Label>InfluxDB Data Location:</Label>
+		</Field>
+
+		<Field id="GrafanaDataLocation" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="/Users/yourusername/Documents/Grafana" tooltip="location for the data files for Grafana" enabledBindingId="DisableGrafana" enabledBindingNegate="true">
+				<Label>Grafana Dashbaord Data Location:</Label>
+		</Field>
+
+		<Field type="menu" id="InfluxRetention" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" defaultValue="24">
+			<Label>InfluxDB Retention Policy:</Label>
+			<List>
+				<Option value="6">6 months</Option>
+				<Option value="12">1 year</Option>
+				<Option value="24">2 years</Option>
+				<Option value="60">5 years</Option>
+				<Option value="-1">Disabled</Option>
+			</List>
+		</Field>			
+
+	<Field id="simpleSeparator2" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="separator"/>
+
+<Field id="section1" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+	<Label>-----   Advanced Configuration (these default values should be fine for most users) -----</Label>
+</Field>		
+
+	<Field id="InfluxDisableInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>If you wish to use a external InfluxDB Server and disable the included server, use this option.</Label>
+	</Field>
+
+
+		<Field id="ExternalDB" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+				<Label>Disable InfluxDB Server:</Label>
+		</Field>
+
+		<Field id="InfluxHost" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="localhost" tooltip="Host address" enabledBindingId="ExternalDB" enabledBindingValue="true">
+					 <Label>InfluxDB External Server Host:</Label>
+		</Field>
+
+	<Field id="InfluxPortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>If using included InfluxDB server, this is the port that the server will be configured; if using an external InfluxDB Server, this is the port that the plugin will connect to.</Label>
+	</Field>
+
+		<Field id="InfluxPort" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="8088" tooltip="Port, default 8088" enabledBindingId="ExternalDB" enabledBindingNegate="true">
+				<Label>InfluxDB Port:</Label>
+		</Field>
+
+	<Field id="httpPortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>If using included InfluxDB server, this is the http port that the server will be configured; if using an external InfluxDB Server, this is the port that the plugin will connect to</Label>
+	</Field>
+
+
+		<Field id="InfluxHTTPPort" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="8086" tooltip="HTTP Port, default 8088">
+				<Label>InfluxDB HTTP Port:</Label>
+		</Field>
+
+	<Field id="InfluxUserInstruction" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>If using included InfluxDB server, this is the admin user/password that will be created; if using an external InfluxDB Server, this is the user/password that the plugin will use to connect</Label>
+	</Field>
+
+		<Field id="InfluxUser" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="indigo" tooltip="user name for indigo posting">
+				<Label>InfluxDB User:</Label>
+		</Field>
+
+
+		<Field id="InfluxPassword" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="indigo" tooltip="password for indigo posting user" secure="true">
+				<Label>InfluxDB Password:</Label>
+		</Field>
+
+	<Field id="InfluxUseDBInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>This is the database that will be created/used on the configured InfluxDB server</Label>
+	</Field>
+
+		<Field id="InfluxDB" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="indigo" tooltip="database name in influx">
+				<Label>InfluxDB Database:</Label>
+		</Field>
+
+	<Field id="GrafanaDisableInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>Disables the internal Grafana Server in case you've brought your own instance of Grafana.</Label>
+	</Field>
+
+		<Field id="DisableGrafana" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+				<Label>Disable Included Grafana Server:</Label>
+		</Field>
+
+		<Field id="GrafanaPort" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="3006" tooltip="Port, default 3006" enabledBindingId="DisableGrafana" enabledBindingNegate="true">
+				<Label>Grafana Port:</Label>
+		</Field>
+
+		<Field id="ServerDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+				<Label>Plugin and server debug</Label>
+				<Description>Enable</Description>
+		</Field>
+
+		<Field id="TransportDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+				<Label>InfluxDB update decisions debug</Label>
+				<Description>Enable</Description>
+		</Field>
+
+		<Field id="TransportDebugL2" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+				<Label>InfluxDB update decisions L2 debug (not recommended)</Label>
+				<Description>Enable</Description>
+		</Field>
+
+		<Field id="JSONDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+				<Label>InfluxDB update full JSON debug (not recommended)</Label>
+				<Description>Enable</Description>
+		</Field>
+
+<!-- THIS IS THE START TO THE INCLUSION CRITERIA CONFIGURATION -->
+
+<Field id="section2-1" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
+	<Label>Step 1. Include these state values for every device</Label>
+</Field>		
+<Field id="SortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>Use this to sort the states by name or by the frequency of use.</Label>
+	</Field>
+
+	<Field id="IncStatesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>States to include from all devices (number in parens indicates the number of devices that share this state)</Label>
+	</Field>
+
+		<Field type="list" id="listIncStates" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="state.onOffState, state.hvac_state, onState, energyCurLevel, energyAccumTotal, value.num, sensorValue, coolSetpoint, heatSetpoint, batteryLevel, state.batteryLevel" rows="12" alwaysUseInDialogHeightCalc="true">
+			<Label>Included States:</Label>
+			<List class="self" method="IncludedStatesListGenerator" dynamicReload="true" />
+		</Field>
+
+<Field id="removeStateButton" type="button" tooltip="Remove one or more states from teh state list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
+	<Label></Label>
+	<Title>remove selected state(s)</Title>
+	<CallbackMethod>RemoveStateFromIncludedDeviceList</CallbackMethod>
+</Field>
+
+		<Field type="menu" id="menuAvailableStates" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
+			<Label>Available states:</Label>
+			<List class="self" method="AvailableStatesGenerator" dynamicReload="true" />
+		</Field>			
+
+<Field id="addStateButton" type="button" tooltip="Add the state from the menu above to the included state list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
+	<Label></Label>
+	<Title>add state</Title>
+	<CallbackMethod>AddStateToIncludedStateList</CallbackMethod>
+</Field>
+
+<Field id="resetStateButton" type="button" tooltip="Reset to default the states from the menu above to the included state list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
+	<Label></Label>
+	<Title>reset to default states</Title>
+	<CallbackMethod>ResetStatesIncludedStateList</CallbackMethod>
+</Field>
+
+	<Field id="simpleSeparator2-2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="separator"/>
+
+<Field id="section2-2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
+	<Label>Step 2. Include all states from these devices</Label>
+</Field>		
+
+	<Field id="IncDevsInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>Devices to include all states.  Hold the Command key to select multiple states.</Label>
+	</Field>
+
+		<Field type="list" id="listIncDevices" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="*" rows="12" alwaysUseInDialogHeightCalc="true">
+			<Label>Include Devices:</Label>
+			<List class="self" method="IncludedDeviceListGenerator" dynamicReload="true" />
+		</Field>
+
+<Field id="removeDeviceButton" type="button" tooltip="Remove one or more states from teh state list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
+	<Label></Label>
+	<Title>remove selected device(s)</Title>
+	<CallbackMethod>RemoveDeviceFromIncludedDeviceList</CallbackMethod>
+</Field>
+
+		<Field type="menu" id="menuAvailableDevices" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
+			<Label>Available devices:</Label>
+			<List class="self" method="AvailableDevicesGenerator" dynamicReload="true" />
+		</Field>	
+
+<Field id="addDeviceButton" type="button" tooltip="Add the device from the menu above to the included device list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
+	<Label></Label>
+	<Title>add device</Title>
+	<CallbackMethod>AddDeviceToIncludedDeviceList</CallbackMethod>
+</Field>
+
+	<Field id="simpleSeparator2-3" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="separator"/>
+
+<Field id="section2-3" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
+	<Label>Step 3. Exclude these devices no matter what</Label>
+</Field>		
+
+	<Field id="ExcDevsInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>Devices to exclude.  Good to exclude any devices that you will not analyize and that have frequently changing states that match the previous criteria.</Label>
+	</Field>
+
+		<Field type="list" id="listExclDevices" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="" rows="12" alwaysUseInDialogHeightCalc="true">
+			<Label>Exclude Devices:</Label>
+			<List class="self" method="ExcludedDeviceListGenerator" dynamicReload="true" />
+		</Field>
+
+	<Field id="simpleSeparator2-4" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="separator"/>
+
+<Field id="section4" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
+	<Label>Other configuration properties</Label>
+</Field>		
+
+	<Field id="MinumumUpdateInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" alignText="left" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>This field configures the minimum frequency of updates.  For each device that is sent to InfluxDB, if the device has not had a change in Indigo in the time period configured, the plugin will send an update to InfluxDB.    
+
+		This avoids the problem of missing data on the left side (especially for discrete graphs) for devices / variables that are updated infrequently. For example, if your HVAC turned on yesterday at 11:50pm and turns off at 11:59pm. Then it turns on today at 10am until 10:10:am. If you graph today only, Grafana doesn't know what the HVAC state was from midnight to 10am.
+		</Label>
+	</Field>
+
+		<Field type="menu" id="MinimumUpdateFrequency" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="5">
+			<Label>Minimum InfluxDB update frequency:</Label>
+			<List>
+				<Option value="5">5 Minutes</Option>
+				<Option value="10">10 Minutes</Option>
+				<Option value="15">15 Minutes</Option>
+				<Option value="30">30 Minutes</Option>
+				<Option value="60">60 Minutes</Option>
+				<Option value="-1">Disabled</Option>
+			</List>
+		</Field>			
+</PluginConfig>
+

@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+
+
+<MenuItems>
+	<MenuItem id="exporeDevice">
+	<Name>Explore device</Name>
+	<ButtonTitle>Close</ButtonTitle>
+	<ConfigUI>
+		<Field type="menu" id="menuDevice">
+			<Label>Explore Device:</Label>
+			<List class="indigo.devices"/>
+		</Field>	
+			<Field id="buttonPrintDeviceToEventLog" type="button" tooltip="">
+				<Label></Label>
+				<Title>print to Event Log</Title>
+				<CallbackMethod>PrintDeviceToEventLog</CallbackMethod>
+			</Field>
+
+	</ConfigUI>
+	</MenuItem>
+	<MenuItem id="exploreProperty">
+	<Name>Explore state</Name>
+	<ButtonTitle>Print to Event Log</ButtonTitle>
+	<ConfigUI>
+		<Field type="menu" id="menuProperty">
+			<Label>Explore state/property:</Label>
+			<List class="self" method="AllStatesGenerator" dynamicReload="true" />
+		</Field>	
+
+			<Field id="buttonPrintDeviceToEventLog" type="button" tooltip="">
+				<Label></Label>
+				<Title>print to Event Log</Title>
+				<CallbackMethod>PrintStateToEventLog</CallbackMethod>
+			</Field>
+
+	</ConfigUI>
+	</MenuItem>
+
+</MenuItems>
