@@ -12,5 +12,5 @@ Be aware of the system requirements for InfluxDB.
 
 InfluxDB System Requirements - [https://docs.influxdata.com/influxdb/v1.5/guides/hardware_sizing/]
 
-# Support#
+# Support #
 Indigo forums - [http://forums.indigodomo.com/viewforum.php?f=279&sid=8325f6e661b0bea59f44b6989402f6c5]
