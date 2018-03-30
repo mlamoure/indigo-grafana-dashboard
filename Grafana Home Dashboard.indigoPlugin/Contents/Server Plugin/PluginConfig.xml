@@ -116,6 +116,11 @@
 				<Description>Enable</Description>
 		</Field>
 
+		<Field id="ConfigDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+				<Label>Configuration Debug</Label>
+				<Description>Enable</Description>
+		</Field>
+
 		<Field id="TransportDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
 				<Label>InfluxDB update decisions debug</Label>
 				<Description>Enable</Description>

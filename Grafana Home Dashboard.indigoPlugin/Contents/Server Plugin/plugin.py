@@ -44,6 +44,7 @@ class Plugin(indigo.PluginBase):
 		self.DeviceLastUpdatedList = []
 
 		self.FullStateList = []
+		self.AllStatesUI = []
 		self.AvailableStatesUI = []
 		self.AvailableIncDevices = []
 		self.AvailableExlDevices = []
@@ -78,6 +79,7 @@ class Plugin(indigo.PluginBase):
 
 			self.ServerDebug = self.pluginPrefs.get("ServerDebug", False)
 			self.debug = self.ServerDebug
+			self.ConfigDebug = self.pluginPrefs.get("ConfigDebug", False)
 
 			self.TransportDebug = self.pluginPrefs.get("TransportDebug", False)
 			self.TransportDebugL2 = self.pluginPrefs.get("TransportDebugL2", False)
@@ -734,6 +736,7 @@ class Plugin(indigo.PluginBase):
 			self.ServerDebug = valuesDict["ServerDebug"]
 			self.debug = self.ServerDebug
 
+			self.ConfigDebug = valuesDict["ConfigDebug"]
 			self.TransportDebug = valuesDict["TransportDebug"]
 			self.TransportDebugL2 = valuesDict["TransportDebugL2"]
 			self.JSONDebug = valuesDict["JSONDebug"]
@@ -861,11 +864,11 @@ class Plugin(indigo.PluginBase):
 
 			### Included and Excluded Devices Available to assign list
 			if dev.id not in self.DeviceIncludeList and dev.id not in self.DeviceExcludeList:
-				self.AvailableIncDevices.append((dev.id, dev.name))
+				self.AvailableIncDevices.append((dev.id, dev.name.replace(",", " ").replace(";", " ")))
 			
 			### Excluded Devices Available		
 			if dev.id not in self.DeviceIncludeList:
-				self.AvailableExlDevices.append((dev.id, dev.name))
+				self.AvailableExlDevices.append((dev.id, dev.name.replace(",", " ").replace(";", " ")))
 
 		# The States list is a bit different, creating the one that will bind to the GUI
 		self.AvailableStatesUI = []
@@ -873,13 +876,14 @@ class Plugin(indigo.PluginBase):
 		for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
 			if not ui[0] in self.StatesIncludeList:
 				self.AvailableStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
+			self.AllStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 
 		# Rebuild the UI lists for Include and Exclude to be ready for use with the config dialog
 		self.DeviceIncludeListUI = []
 
 		for item in self.DeviceIncludeList:
 			try:
-				self.DeviceIncludeListUI.append((item, indigo.devices[int(item)].name))
+				self.DeviceIncludeListUI.append((item, indigo.devices[int(item)].name.replace(",", " ").replace(";", " ")))
 			except:
 				self.logger.error("could not find device " + item + " to add to the InfluxDB device list")
 				pass
@@ -888,7 +892,7 @@ class Plugin(indigo.PluginBase):
 
 		for item in self.DeviceExcludeList:
 			try:
-				self.DeviceListExcludeListUI.append((item, indigo.devices[int(item)].name))
+				self.DeviceListExcludeListUI.append((item, indigo.devices[int(item)].name.replace(",", " ").replace(";", " ")))
 			except:
 				self.logger.error("could not find device " + item + " to add to the InfluxDB exclude device list")
 				pass
@@ -896,8 +900,10 @@ class Plugin(indigo.PluginBase):
 		self.logger.debug("completed BuildConfigurationLists")
 
 	def IncludedStatesListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
-		self.logger.debug("IncludedStatesListGenerator()")
-		self.logger.debug("self.StatesIncludeList: " + str(self.StatesIncludeList))
+		if self.ConfigDebug:
+			self.logger.debug("IncludedStatesListGenerator()")
+			self.logger.debug("self.StatesIncludeList: " + str(self.StatesIncludeList))
+
 		toReturn = []
 
 		for item in self.StatesIncludeList:
@@ -906,26 +912,45 @@ class Plugin(indigo.PluginBase):
 		return toReturn
 
 	def IncludedDeviceListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
+		if self.ConfigDebug:
+			self.logger.debug("IncludedDeviceListGenerator()")
+			self.logger.debug("self.DeviceIncludeListUI: " + str(self.DeviceIncludeListUI))
+
 		return self.DeviceIncludeListUI
 
 	def ExcludedDeviceListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
+		if self.ConfigDebug:
+			self.logger.debug("ExcludedDeviceListGenerator()")
+			self.logger.debug("self.AvailableExlDevices: " + str(self.AvailableExlDevices))
+
 		return self.AvailableExlDevices
 
 ######
 	def AvailableStatesGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
-		return self.AvailableStatesUI
+		if self.ConfigDebug:
+			self.logger.debug("AvailableStatesGenerator()")
+			self.logger.debug("self.AvailableStatesUI: " + str(self.AvailableStatesUI))
 
-	def AllStatesGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
 		return self.AvailableStatesUI
 
 	def AvailableDevicesGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
+		if self.ConfigDebug:
+			self.logger.debug("AvailableDevicesGenerator()")
+			self.logger.debug("self.AvailableIncDevices: " + str(self.AvailableIncDevices))
+
 		return self.AvailableIncDevices
 
+	def AllStatesGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
+		if self.ConfigDebug:
+			self.logger.debug("AllStatesGenerator()")
+			self.logger.debug("self.AllStatesUI: " + str(self.AllStatesUI))
+
+		return self.AllStatesUI
 ######
 
 	def AddDeviceToIncludedDeviceList(self, valuesDict, typeId="", devId=0):
 		self.DeviceIncludeList.append(int(valuesDict["menuAvailableDevices"]))
-		self.DeviceIncludeListUI.append((valuesDict["menuAvailableDevices"], indigo.devices[int(valuesDict["menuAvailableDevices"])].name))
+		self.DeviceIncludeListUI.append((valuesDict["menuAvailableDevices"], indigo.devices[int(valuesDict["menuAvailableDevices"])].name.replace(",", " ").replace(";", " ")))
 
 		for item in self.AvailableIncDevices:
 			if item[0] == int(valuesDict["menuAvailableDevices"]):
@@ -944,8 +969,8 @@ class Plugin(indigo.PluginBase):
 			self.DeviceIncludeList.remove(indigodev.id)
 			self.DeviceIncludeListUI.remove((indigodev.id, indigodev.name))
 
-			self.AvailableIncDevices.append((indigodev.id, indigodev.name))
-			self.AvailableExlDevices.append((indigodev.id, indigodev.name))
+			self.AvailableIncDevices.append((indigodev.id, indigodev.name.replace(",", " ").replace(";", " ")))
+			self.AvailableExlDevices.append((indigodev.id, indigodev.name.replace(",", " ").replace(";", " ")))
 
 		return valuesDict
 
@@ -961,7 +986,9 @@ class Plugin(indigo.PluginBase):
 
 	def RemoveStateFromIncludedDeviceList(self, valuesDict, typeId=0, devId=0):
 		for state in valuesDict["listIncStates"]:
-			self.logger.debug("removing: " + str(state))
+			if self.ConfigDebug:
+				self.logger.debug("removing: " + str(state))
+
 			self.StatesIncludeList.remove(state)
 
 			for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
@@ -971,7 +998,8 @@ class Plugin(indigo.PluginBase):
 		return valuesDict
 
 	def ResetStatesIncludedStateList(self, valuesDict, typeId="", devId=0):
-		self.logger.debug("resetting to default states")
+		if self.ConfigDebug:
+			self.logger.debug("resetting to default states")
 
 		self.StatesIncludeList = DEFAULT_STATES[:]
 
@@ -986,25 +1014,27 @@ class Plugin(indigo.PluginBase):
 
 	def PrintDeviceToEventLog(self, valuesDict, typeId=0, devId=0):
 		dev = indigo.devices[int(valuesDict["menuDevice"])]
+		excluded = False
 
 		if dev.id in self.DeviceExcludeList:
-			indigo.server.log("Device \"" + dev.name + "\" is EXCLUDED and would never be sent to InfluxDB")
-			return valuesDict
+			indigo.server.log("NOTE: Device \"" + dev.name + "\" is EXCLUDED in your config and therefore all states are EXCLUDED InfluxDB")
+			excluded = True
 
-		if dev.id in self.DeviceIncludeList:
-			indigo.server.log("JSON representation (ALL STATES) of device " + dev.name + ":")
-			newjson = self.adaptor.diff_to_json(dev, [], False)
-		else:
-			indigo.server.log("JSON representation (INCLUDED STATES ONLY!) of device " + dev.name + ":")
-			newjson = self.adaptor.diff_to_json(dev, self.StatesIncludeList, False)
+		indigo.server.log("JSON representation of device " + dev.name + ":")
+		newjson = self.adaptor.diff_to_json(dev, [], False)
 
 		if newjson is None:
-			indigo.server.log("   the device: \"" + dev.name + "\" is not excluded from updates to InfluxDB, but it contains no states/properties that are cofigured to be sent to Influx/Grafana.")			
+			indigo.server.log("   the device: \"" + dev.name + "\" is not excluded from updates to InfluxDB, but it contains no states/properties that are capable of being sent to Influx/Grafana.")			
 
 		else:
 			for kk, vv in newjson.iteritems():
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
-					indigo.server.log("   " + str(kk) + ": " + str(vv))
+					if kk in self.StatesIncludeList and not excluded:
+						status = " (INCLUDED)"
+					else:
+						status = " (EXCLUDED)"
+
+					indigo.server.log("   " + str(kk) + ": " + str(vv) + status)
 
 		return valuesDict
 
@@ -1014,11 +1044,19 @@ class Plugin(indigo.PluginBase):
 
 		indigo.server.log("Devices containing the property " + searchKey + ":")
 		for dev in indigo.devices:
+			excluded = False
+			if dev.id in self.DeviceExcludeList:
+				excluded = True
 			### STATES List
 			for kk, vv in self.adaptor.to_json(dev).iteritems():
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 					if kk == searchKey:
-						indigo.server.log("   " + str(counter) + ". " + dev.name)
+						if kk in self.StatesIncludeList and not excluded:
+							status = " (INCLUDED)"
+						else:
+							status = " (EXCLUDED)"
+
+						indigo.server.log("   " + str(counter) + ". " + dev.name + " ;  " + str(kk) + ": " + str(vv) + status)
 						counter = counter + 1
 
 		return valuesDict
