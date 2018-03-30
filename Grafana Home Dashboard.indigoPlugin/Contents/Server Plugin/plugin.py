@@ -83,9 +83,12 @@ class Plugin(indigo.PluginBase):
 			self.TransportDebugL2 = self.pluginPrefs.get("TransportDebugL2", False)
 			self.JSONDebug = self.pluginPrefs.get("JSONDebug", False)
 
-			self.StatesIncludeList = self.pluginPrefs.get("listIncStates", DEFAULT_STATES)
+			self.StatesIncludeList = self.pluginPrefs.get("listIncStates", [])
 			self.DeviceIncludeList = self.pluginPrefs.get("listIncDevices", [])
 			self.DeviceExcludeList = self.pluginPrefs.get("listExclDevices", [])
+
+			if len(self.StatesIncludeList) == 0:
+				self.StatesIncludeList = DEFAULT_STATES[:]
 
 			newlist = []
 			for item in self.DeviceIncludeList:
@@ -101,6 +104,9 @@ class Plugin(indigo.PluginBase):
 			else:
 				self.logger.error("missing proper configuration to start up.")
 			pass
+
+		if len(self.StatesIncludeList) == 0:
+			self.BuildConfigurationLists()
 
 		self.restartAll()
 		self.BuildConfigurationLists()
@@ -157,9 +163,6 @@ class Plugin(indigo.PluginBase):
 				'fields':  what
 			}
 		]
-
-#		if self.pluginPrefs.get(u'debug', False):
-#			indigo.server.log(json.dumps(json_body).encode('utf-8'))
 
 		# don't like my types? ok, fine, what DO you want?
 		retrylimit = 30
@@ -837,10 +840,6 @@ class Plugin(indigo.PluginBase):
 		self.logger.debug("completed processing closedPrefsConfigUi")
 
 	def BuildConfigurationLists(self):
-
-		if not self.connected:
-			return
-
 		self.logger.debug("starting BuildConfigurationLists()")
 
 		self.LastConfigRefresh = datetime.datetime.now()
@@ -868,8 +867,9 @@ class Plugin(indigo.PluginBase):
 			if dev.id not in self.DeviceIncludeList:
 				self.AvailableExlDevices.append((dev.id, dev.name))
 
-
 		# The States list is a bit different, creating the one that will bind to the GUI
+		self.AvailableStatesUI = []
+
 		for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
 			if not ui[0] in self.StatesIncludeList:
 				self.AvailableStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
@@ -896,6 +896,8 @@ class Plugin(indigo.PluginBase):
 		self.logger.debug("completed BuildConfigurationLists")
 
 	def IncludedStatesListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
+		self.logger.debug("IncludedStatesListGenerator()")
+		self.logger.debug("self.StatesIncludeList: " + str(self.StatesIncludeList))
 		toReturn = []
 
 		for item in self.StatesIncludeList:
@@ -959,7 +961,7 @@ class Plugin(indigo.PluginBase):
 
 	def RemoveStateFromIncludedDeviceList(self, valuesDict, typeId=0, devId=0):
 		for state in valuesDict["listIncStates"]:
-#			self.logger.debug("removing: " + str(state))
+			self.logger.debug("removing: " + str(state))
 			self.StatesIncludeList.remove(state)
 
 			for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
@@ -969,8 +971,11 @@ class Plugin(indigo.PluginBase):
 		return valuesDict
 
 	def ResetStatesIncludedStateList(self, valuesDict, typeId="", devId=0):
-		self.StatesIncludeList = DEFAULT_STATES
+		self.logger.debug("resetting to default states")
 
+		self.StatesIncludeList = DEFAULT_STATES[:]
+
+		self.AvailableStatesUI = []		
 		for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
 			if not ui[0] in self.StatesIncludeList:
 				self.AvailableStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
@@ -998,7 +1003,8 @@ class Plugin(indigo.PluginBase):
 
 		else:
 			for kk, vv in newjson.iteritems():
-				indigo.server.log("   " + str(kk) + ": " + str(vv))
+				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
+					indigo.server.log("   " + str(kk) + ": " + str(vv))
 
 		return valuesDict
 
@@ -1010,8 +1016,9 @@ class Plugin(indigo.PluginBase):
 		for dev in indigo.devices:
 			### STATES List
 			for kk, vv in self.adaptor.to_json(dev).iteritems():
-				if kk == searchKey:
-					indigo.server.log("   " + str(counter) + ". " + dev.name)
-					counter = counter + 1
+				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
+					if kk == searchKey:
+						indigo.server.log("   " + str(counter) + ". " + dev.name)
+						counter = counter + 1
 
 		return valuesDict

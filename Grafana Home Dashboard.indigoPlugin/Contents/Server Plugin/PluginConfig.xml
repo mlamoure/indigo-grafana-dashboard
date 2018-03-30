@@ -136,15 +136,15 @@
 <Field id="section2-1" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
 	<Label>Step 1. Include these state values for every device</Label>
 </Field>		
-<Field id="SortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>Use this to sort the states by name or by the frequency of use.</Label>
-	</Field>
 
 	<Field id="IncStatesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>States to include from all devices (number in parens indicates the number of devices that share this state)</Label>
+		<Label>States to include from all devices (number in parens indicates the number of devices that share this state)
+
+			Note: The states that are selected/highligted in this box are ignored.  Any state listed in this box will be included.  States can be removed by highlighting and clicking the "remove selected states" button.
+		</Label>
 	</Field>
 
-		<Field type="list" id="listIncStates" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="state.onOffState, state.hvac_state, onState, energyCurLevel, energyAccumTotal, value.num, sensorValue, coolSetpoint, heatSetpoint, batteryLevel, state.batteryLevel" rows="12" alwaysUseInDialogHeightCalc="true">
+		<Field type="list" id="listIncStates" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="" rows="12" alwaysUseInDialogHeightCalc="true">
 			<Label>Included States:</Label>
 			<List class="self" method="IncludedStatesListGenerator" dynamicReload="true" />
 		</Field>
