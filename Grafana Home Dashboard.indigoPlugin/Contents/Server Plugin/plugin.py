@@ -30,6 +30,8 @@ class Plugin(indigo.PluginBase):
 		indigo.devices.subscribeToChanges()
 		indigo.variables.subscribeToChanges()
 		self.connection = None
+		self.ConnectionRetryCount = 0		
+		
 		self.adaptor = None
 		self.QuietNoGrafanaConfigured = False
 		self.QuietConnectionError = False
@@ -151,13 +153,27 @@ class Plugin(indigo.PluginBase):
 					self.logger.debug("error while setting the retention policy: " + str(e))
 
 				indigo.server.log(u'connected to InfluxDB sucessfully...')
+				self.ConnectionRetryCount = 0
 				self.connected = True
 				self.QuietConnectionError = False
 			except Exception as e:
 				self.logger.debug("error while connecting to InfluxDB: " + str(e))
+
+				# Check to see if there is a admin user account issue
+				if "admin user" in str(e).lower():
+					self.logger.debug("detected that there is something wrong with the admin account, triggering a refresh")
+					indigo.server.log("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
+					self.triggerInfluxAdminReset = True					
+					self.triggerInfluxReset = True					
+
 				if not self.QuietConnectionError:
 					self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
 					self.QuietConnectionError = True
+
+				self.ConnectionRetryCount = self.ConnectionRetryCount + 1
+				if self.ConnectionRetryCount > 2 and self.ConnectionRetryCount < 5 and not self.ExternalDB and not self.triggerInfluxReset:
+					self.logger.debug("triggering a InfluxDB reset since connections are failing")
+					self.triggerInfluxReset = True
 
 				self.connected = False
 
@@ -398,9 +414,6 @@ class Plugin(indigo.PluginBase):
 			self.logger.debug("not currently connected to any InfluxDB, so will not start the Grafana Server")
 			self.QuietNoGrafanaConfigured = True
 
-		if not self.connected:
-			self.logger.debug("not currently connected to any InfluxDB")
-
 	def restartGrafana(self):
 		indigo.server.log("######## About to (re) start Grafana.  Please be patient while this happens. ########")
 		self.StopGrafanaServer()
@@ -604,7 +617,7 @@ class Plugin(indigo.PluginBase):
 			try:
 				self.connection.drop_user(user)
 			except:
-				self.logger.debug("Error while dropping user, likely the user did not exist")
+				self.logger.debug("error while dropping user, likely the user did not exist")
 				return False
 
 			return True
