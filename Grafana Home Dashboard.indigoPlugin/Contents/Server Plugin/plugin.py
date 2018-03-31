@@ -22,7 +22,7 @@ import signal
 DEFAULT_POLLING_INTERVAL = 60  # number of seconds between each poll
 UPDATE_STATES_LIST = 15 # how frequently (in minutes) to update the state list
 
-DEFAULT_STATES = ["state.onOffState", "state.hvac_state", "onState", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
+DEFAULT_STATES = ["state.onOffState", "model", "subModel", "deviceTypeId", "state.hvac_state", "onState", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
 class Plugin(indigo.PluginBase):
 	def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
@@ -68,14 +68,15 @@ class Plugin(indigo.PluginBase):
 			self.InfluxHost = self.pluginPrefs.get('InfluxHost', 'localhost')
 			self.InfluxPort = self.pluginPrefs.get('InfluxPort', '8088')
 			self.InfluxHTTPPort = self.pluginPrefs.get('InfluxHTTPPort', '8086')
-			self.InfluxUser = self.pluginPrefs.get('InfluxUser', 'indigo')
-			self.InfluxPassword = self.pluginPrefs.get('InfluxPassword', 'indigo')
+			self.InfluxUser = self.pluginPrefs.get('InfluxUser', '')
+			self.InfluxPassword = self.pluginPrefs.get('InfluxPassword', '')
 			self.InfluxDB = self.pluginPrefs.get('InfluxDB', 'indigo')
 			self.GrafanaPort = self.pluginPrefs.get('GrafanaPort', '3006')
 			self.ExternalDB = self.pluginPrefs.get('ExternalDB', False)
 			self.GrafanaDataLocation = self.pluginPrefs.get('GrafanaDataLocation', None)
 			self.InfluxDataLocation = self.pluginPrefs.get('InfluxDataLocation', None)
 			self.DisableGrafana = self.pluginPrefs.get('DisableGrafana', False)
+			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
 			self.miniumumUpdateFrequency = int(self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60))
 
 			self.ServerDebug = self.pluginPrefs.get("ServerDebug", False)
@@ -102,10 +103,10 @@ class Plugin(indigo.PluginBase):
 				self.logger.error("missing proper configuration to start up.")
 			pass
 
-		if len(self.StatesIncludeList) == 0:
-			self.BuildConfigurationLists()
+		# this attempts to detect if the plugin is running for the first time
+		if len(self.StatesIncludeList) != 0:
+			self.restartAll()
 
-		self.restartAll()
 		self.BuildConfigurationLists()
 		self.UpdateAll()
 
@@ -136,12 +137,24 @@ class Plugin(indigo.PluginBase):
 			try:
 				self.connection.create_database(self.InfluxDB)
 				self.connection.switch_database(self.InfluxDB)
-#				self.connection.create_retention_policy('two_year_policy', '730d', '1')
+
+				if self.InfluxRetention == -1:
+					retain = "INF"
+				else:
+					retain = str(int(self.InfluxRetention) * 30) + "d"
+
+				self.logger.debug("setting Influx retention policy of: " + retain)
+
+				try:
+					self.connection.create_retention_policy('indigo_policy', retain, '1')
+				except Exception as e:
+					self.logger.debug("error while setting the retention policy: " + str(e))
 
 				indigo.server.log(u'connected to InfluxDB sucessfully...')
 				self.connected = True
 				self.QuietConnectionError = False
-			except:
+			except Exception as e:
+				self.logger.debug("error while connecting to InfluxDB: " + str(e))
 				if not self.QuietConnectionError:
 					self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
 					self.QuietConnectionError = True
@@ -382,7 +395,7 @@ class Plugin(indigo.PluginBase):
 			self.QuietNoGrafanaConfigured = False
 
 		if not self.connected and not self.QuietNoGrafanaConfigured:
-			self.logger.error("not currently connected to any InfluxDB, so will not start the Grafana Server")
+			self.logger.debug("not currently connected to any InfluxDB, so will not start the Grafana Server")
 			self.QuietNoGrafanaConfigured = True
 
 		if not self.connected:
@@ -571,6 +584,18 @@ class Plugin(indigo.PluginBase):
 
 				sys.stdout.write(line)
 
+
+			# edit the default dashboard provisioning to include the default indigo dashboard
+
+			dashboard_yaml = os.getcwd() + '/servers/grafana/conf/provisioning/dashboards/sample.yaml'
+			provisioning_dashboards_location = os.getcwd() + "/servers/grafana/indigodashboard/"
+
+			for line in fileinput.input(dashboard_yaml, inplace=True):
+				if fileinput.lineno() == 10:
+					line = "     path: " + provisioning_dashboards_location
+
+				sys.stdout.write(line)
+
 			indigo.server.log("config file for Grafana has been updated; server will restart shortly.")
 
 	def DeleteInfluxAdmin(self, user):
@@ -598,10 +623,10 @@ class Plugin(indigo.PluginBase):
 		self.connection.create_user(self.InfluxUser, self.InfluxPassword, admin=True)
 		self.connection.grant_privilege("all", self.InfluxDB, self.InfluxUser)
 
-		self.CreateInfluxConfig(RequireAuth = True)
+		self.CreateInfluxConfig()
 		self.StartInfluxServer()
 
-	def CreateInfluxConfig(self, RequireAuth = False):
+	def CreateInfluxConfig(self, RequireAuth = True):
 		if not self.ExternalDB:
 
 			if not os.path.isdir(self.InfluxDataLocation):
@@ -775,7 +800,11 @@ class Plugin(indigo.PluginBase):
 
 			# Here we have to detect if the admin accounts had changed
 			if ExternalInfluxDBServerChanged or (not self.ExternalDB and (valuesDict['InfluxUser'] != self.InfluxUser or self.InfluxPassword != valuesDict['InfluxPassword'])):
-				self.logger.debug("config for admin user change detected, purging old admin user")
+				if len(self.InfluxUser) == 0:
+					indigo.server.log("first time setup -- config will now be created for InfluxDB.  The InfluxDB server will restart a few times, once that is complete, Grafana will start.")
+				else:
+					indigo.server.log("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
+
 				InfluxServerChanged = True
 				self.triggerInfluxAdminReset = True
 				self.DeleteInfluxAdmin(self.InfluxUser)
@@ -851,6 +880,8 @@ class Plugin(indigo.PluginBase):
 				if dev_id in indigo.devices:
 					self.logger.debug("   validated included device: " + indigo.devices[dev_id].name)
 					newDeviceIncludeList.append(dev_id)
+				else:
+					indigo.server.log("removed a no longer present device from include device list: " + str(item))
 
 			self.DeviceIncludeList = newDeviceIncludeList
 
@@ -867,6 +898,10 @@ class Plugin(indigo.PluginBase):
 					if index != -1:
 						self.logger.debug("   validated included state: " + item)
 						newStatesIncludeList.append(item)
+					else:
+						indigo.server.log("removed a no longer present state from the state include list: " + str(item))
+				else:
+					self.logger.debug("   REMOVED a empty state??!")
 
 			self.StatesIncludeList = newStatesIncludeList
 
@@ -880,6 +915,8 @@ class Plugin(indigo.PluginBase):
 				if dev_id in indigo.devices:
 					self.logger.debug("   validated excluded device: " + indigo.devices[dev_id].name)
 					newDeviceExcludeList.append(dev_id)
+				else:
+					indigo.server.log("removed a no longer present device from exclude device list: " + str(item))
 
 			self.DeviceExcludeList = newDeviceExcludeList
 
