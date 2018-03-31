@@ -30,6 +30,7 @@ class Plugin(indigo.PluginBase):
 		indigo.devices.subscribeToChanges()
 		indigo.variables.subscribeToChanges()
 		self.connection = None
+		self.adaptor = None
 		self.QuietNoGrafanaConfigured = False
 		self.QuietConnectionError = False
 		self.QuietNoInfluxConfigured = False
@@ -91,12 +92,6 @@ class Plugin(indigo.PluginBase):
 
 			if len(self.StatesIncludeList) == 0:
 				self.StatesIncludeList = DEFAULT_STATES[:]
-
-			newlist = []
-			for item in self.DeviceIncludeList:
-				newlist.append(int(item))
-
-			self.DeviceIncludeList = newlist
 
 			self.adaptor = JSONAdaptor(self.logger, self.TransportDebug, self.TransportDebugL2, self.JSONDebug)
 
@@ -271,7 +266,7 @@ class Plugin(indigo.PluginBase):
 
 	def UpdateAll(self):
 
-		if not self.connected:
+		if not self.connected or self.adaptor is None:
 			return
 
 		self.logger.debug("running UpdateAll()")
@@ -842,6 +837,57 @@ class Plugin(indigo.PluginBase):
 
 		self.logger.debug("completed processing closedPrefsConfigUi")
 
+	def ValidateConfigLists(self):
+		self.logger.debug("running ValidateConfigLists()")
+
+		try:
+			newDeviceIncludeList = []
+			for item in self.DeviceIncludeList:
+				if isinstance(item, basestring):
+					dev_id = int(item)
+				else:
+					dev_id = item
+
+				if dev_id in indigo.devices:
+					self.logger.debug("   validated included device: " + indigo.devices[dev_id].name)
+					newDeviceIncludeList.append(dev_id)
+
+			self.DeviceIncludeList = newDeviceIncludeList
+
+			newStatesIncludeList = []
+			for item in self.StatesIncludeList:
+				if len(item) > 0:
+					# Find if the state exists in the full state list
+					try:
+						index = -1
+						index = [y[0] for y in self.FullStateList].index(item)
+					except:
+						index = -1
+
+					if index != -1:
+						self.logger.debug("   validated included state: " + item)
+						newStatesIncludeList.append(item)
+
+			self.StatesIncludeList = newStatesIncludeList
+
+			newDeviceExcludeList = []
+			for item in self.DeviceExcludeList:
+				if isinstance(item, basestring):
+					dev_id = int(item)
+				else:
+					dev_id = item
+
+				if dev_id in indigo.devices:
+					self.logger.debug("   validated excluded device: " + indigo.devices[dev_id].name)
+					newDeviceExcludeList.append(dev_id)
+
+			self.DeviceExcludeList = newDeviceExcludeList
+
+			self.logger.debug("completed ValidateConfigLists()")
+
+		except Exception as e:
+			self.logger.debug("error validating the plugin config, please report this error: " + str(e))
+
 	def BuildConfigurationLists(self):
 		self.logger.debug("starting BuildConfigurationLists()")
 
@@ -870,7 +916,13 @@ class Plugin(indigo.PluginBase):
 			if dev.id not in self.DeviceIncludeList:
 				self.AvailableExlDevices.append((dev.id, dev.name.replace(",", " ").replace(";", " ")))
 
-		# The States list is a bit different, creating the one that will bind to the GUI
+
+		########################
+
+		# This makes sure that all the devices states exist before we build the UI for the plugin config
+		self.ValidateConfigLists()
+
+		# BUILD UI LISTS  -- STATES
 		self.AvailableStatesUI = []
 
 		for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
@@ -878,7 +930,7 @@ class Plugin(indigo.PluginBase):
 				self.AvailableStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 			self.AllStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 
-		# Rebuild the UI lists for Include and Exclude to be ready for use with the config dialog
+		# BUILD UI LISTS  -- INCLUDE
 		self.DeviceIncludeListUI = []
 
 		for item in self.DeviceIncludeList:
@@ -888,6 +940,7 @@ class Plugin(indigo.PluginBase):
 				self.logger.error("could not find device " + item + " to add to the InfluxDB device list")
 				pass
 
+		# BUILD UI LISTS  -- EXCLUDE
 		self.DeviceListExcludeListUI = []
 
 		for item in self.DeviceExcludeList:
