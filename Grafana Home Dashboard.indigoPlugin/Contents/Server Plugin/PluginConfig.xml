@@ -117,7 +117,7 @@
 		</Field>
 
 		<Field id="ConfigDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
-				<Label>Configuration Debug</Label>
+				<Label>Configuration debug</Label>
 				<Description>Enable</Description>
 		</Field>
 

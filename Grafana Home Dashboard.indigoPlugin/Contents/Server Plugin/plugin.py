@@ -874,7 +874,7 @@ class Plugin(indigo.PluginBase):
 		self.AvailableStatesUI = []
 
 		for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
-			if not ui[0] in self.StatesIncludeList:
+			if not ui[0] in self.StatesIncludeList and len(ui[0].strip()) > 0:
 				self.AvailableStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 			self.AllStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 
@@ -907,7 +907,8 @@ class Plugin(indigo.PluginBase):
 		toReturn = []
 
 		for item in self.StatesIncludeList:
-			toReturn.append((item, item))
+			if len(item.strip()) > 0:
+				toReturn.append((item, item))
 
 		return toReturn
 
@@ -1031,8 +1032,10 @@ class Plugin(indigo.PluginBase):
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 					if kk in self.StatesIncludeList and not excluded:
 						status = " (INCLUDED)"
-					else:
+					elif excluded:
 						status = " (EXCLUDED)"
+					else:
+						status = " (NOT INCLUDED)"
 
 					indigo.server.log("   " + str(kk) + ": " + str(vv) + status)
 
@@ -1053,8 +1056,10 @@ class Plugin(indigo.PluginBase):
 					if kk == searchKey:
 						if kk in self.StatesIncludeList and not excluded:
 							status = " (INCLUDED)"
-						else:
+						elif excluded:
 							status = " (EXCLUDED)"
+						else:
+							status = " (NOT INCLUDED)"
 
 						indigo.server.log("   " + str(counter) + ". " + dev.name + " ;  " + str(kk) + ": " + str(vv) + status)
 						counter = counter + 1
