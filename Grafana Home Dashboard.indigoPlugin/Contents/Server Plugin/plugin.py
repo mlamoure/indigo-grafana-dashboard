@@ -4,7 +4,7 @@
 #
 
 import sys
-sys.path.insert(1, './lib')
+sys.path.append('./lib')
 
 import indigo
 import datetime
