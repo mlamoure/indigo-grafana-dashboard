@@ -49,7 +49,7 @@ class Plugin(indigo.PluginBase):
 		self.triggerInfluxReset = False
 		self.triggerInfluxRestart = False
 		self.triggerInfluxAdminReset = False
-		self.triggerGrafanaReset = False
+		self.triggerGrafanaRestart = False
 		self.InfluxRequireAuth = True
 
 		self.VariableLastUpdatedList = []
@@ -263,10 +263,10 @@ class Plugin(indigo.PluginBase):
 						self.triggerInfluxRestart = True
 						self.CreateInfluxAdmin()
 
-					elif self.triggerInfluxRestart and self.triggerGrafanaReset:
+					elif self.triggerInfluxRestart and self.triggerGrafanaRestart:
 						self.logger.debug("detected that a server restart needs to occur...")
 						self.triggerInfluxRestart = False
-						self.triggerGrafanaReset = False
+						self.triggerGrafanaRestart = False
 						self.restartAll()
 
 					elif self.triggerInfluxRestart:
@@ -274,9 +274,9 @@ class Plugin(indigo.PluginBase):
 						self.triggerInfluxRestart = False
 						self.restartInflux()
 
-					elif self.triggerGrafanaReset:
+					elif self.triggerGrafanaRestart:
 						self.logger.debug("detected that a grafana server restart needs to occur...")
-						self.triggerGrafanaReset = False
+						self.triggerGrafanaRestart = False
 						self.restartGrafana()
 
 					# Check if Influx is not auth enabled
@@ -542,7 +542,7 @@ class Plugin(indigo.PluginBase):
 
 		if self.GrafanaServerStartFailureCount > 1:
 			self.logger.error("failed to start the Grafana server more than once, will not attempt again, please check your config")
-			self.triggerGrafanaReset = False
+			self.triggerGrafanaRestart = False
 			self.QuietNoGrafanaConfigured = True
 			return
 
@@ -562,14 +562,23 @@ class Plugin(indigo.PluginBase):
 				indigo.server.log("######## Grafana server started. ########")
 				indigo.server.log ("You can now access your Indigo Home Dashboard via: http://localhost:" + self.GrafanaPort + " (or by using your Mac's IP address from another computer on your local network)")
 				self.GrafanaServerStatus = "started"
+				self.triggerGrafanaRestart = False
+				self.GrafanaServerStartFailureCount = 0
 				return True
 				
 			loopcount = loopcount + 1
 
-		self.logger.error("error starting the Grafana server")
 		self.GrafanaServerStatus = "stopped"
 		self.GrafanaServerStartFailureCount = self.GrafanaServerStartFailureCount + 1
-		self.triggerGrafanaReset = True
+
+		if self.GrafanaServerStartFailureCount > 5:
+			self.logger.error("error starting the Grafana server, exausted retry attempts")
+			self.triggerGrafanaRestart = False
+		elif self.GrafanaServerStartFailureCount == 1:
+			self.logger.error("error starting the Grafana server... will continue to attempt in the background")
+			self.triggerGrafanaRestart = True
+		else:
+			self.triggerGrafanaRestart = True
 
 	def StopGrafanaServer(self):
 		if self.DisableGrafana:
@@ -592,8 +601,9 @@ class Plugin(indigo.PluginBase):
 				os.kill(pid, signal.SIGKILL)		
 
 	def checkServerStatus(self):
+		self.logger.debug("running checkServerStatus()")
 		influxResult = self.checkRunningServer(self.InfluxHTTPPort)
-		grafanaResult = self.checkRunningServer(self.InfluxHTTPPort)
+		grafanaResult = self.checkRunningServer(self.GrafanaPort)
 
 		if grafanaResult:
 			self.GrafanaServerStatus = "started"
@@ -604,6 +614,12 @@ class Plugin(indigo.PluginBase):
 			self.InfluxServerStatus = "started"
 		else:
 			self.InfluxServerStatus = "stopped"
+
+		if influxResult and self.connected and not grafanaResult and not self.triggerGrafanaRestart and self.GrafanaServerStartFailureCount <= 5:
+			self.logger.debug("   found that Grafana is not running, triggering a restart")
+			self.triggerGrafanaRestart = True
+
+		self.logger.debug("completed checkServerStatus(), GrafanaServerStatus: " + self.GrafanaServerStatus + ", InfluxServerStatus: " + self.InfluxServerStatus)
 
 	def checkRunningServer(self, port):
 		try:			
@@ -935,7 +951,7 @@ class Plugin(indigo.PluginBase):
 			if GrafanaServerChanged:
 				self.logger.debug("identified that config properties for the Grafana Server have changed")
 				self.CreateGrafanaConfig()
-				self.triggerGrafanaReset = True
+				self.triggerGrafanaRestart = True
 
 			# if a change was made to the Influx credentials and we are using a external server, simply reconnect
 			if self.ExternalDB and InfluxServerChanged:
