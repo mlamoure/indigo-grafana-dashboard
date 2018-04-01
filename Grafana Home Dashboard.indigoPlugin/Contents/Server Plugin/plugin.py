@@ -3,6 +3,9 @@
 # Copyright (c) 2018 Mike Lamoureux
 #
 
+import sys
+sys.path.insert(1, './lib')
+
 import indigo
 import datetime
 import time
@@ -12,7 +15,6 @@ from json_adaptor import JSONAdaptor
 from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError
 import fileinput
-import sys
 import shutil
 import subprocess
 from subprocess import check_output
@@ -50,6 +52,8 @@ class Plugin(indigo.PluginBase):
 		self.triggerInfluxRestart = False
 		self.triggerInfluxAdminReset = False
 		self.triggerGrafanaRestart = False
+		self.triggerGrafanaReset = False
+
 		self.InfluxRequireAuth = True
 
 		self.VariableLastUpdatedList = []
@@ -262,6 +266,11 @@ class Plugin(indigo.PluginBase):
 						self.triggerInfluxAdminReset = False
 						self.triggerInfluxRestart = True
 						self.CreateInfluxAdmin()
+
+					elif self.triggerGrafanaReset:
+						self.logger.debug("detected that a Grafana reset needs to occur...")
+						self.triggerGrafanaRestart = True
+						self.CreateGrafanaConfig()
 
 					elif self.triggerInfluxRestart and self.triggerGrafanaRestart:
 						self.logger.debug("detected that a server restart needs to occur...")
@@ -577,6 +586,9 @@ class Plugin(indigo.PluginBase):
 		elif self.GrafanaServerStartFailureCount == 1:
 			self.logger.error("error starting the Grafana server... will continue to attempt in the background")
 			self.triggerGrafanaRestart = True
+		elif self.GrafanaServerStartFailureCount == 3:
+			self.logger.debug("error starting the Grafana server... triggering a reset")
+			self.triggerGrafanaReset = True
 		else:
 			self.triggerGrafanaRestart = True
 
@@ -672,6 +684,7 @@ class Plugin(indigo.PluginBase):
 
 				sys.stdout.write(line)
 
+			self.triggerGrafanaReset = False
 			indigo.server.log("config file for Grafana has been updated; server will restart shortly.")
 
 	def DeleteInfluxAdmin(self, user):
