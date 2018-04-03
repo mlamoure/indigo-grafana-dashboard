@@ -45,6 +45,7 @@ class Plugin(indigo.PluginBase):
 		self.QuietConnectionError = False
 		self.QuietNoInfluxConfigured = False
 		self.QuietNoGrafanaConfigured = False
+		self.StopConnectionAttempts = False
 
 		self.InfluxServerPID = None
 		self.GrafanaServerPID = None
@@ -137,10 +138,13 @@ class Plugin(indigo.PluginBase):
 		self.updater.update()
 
 	def connect(self):
-		self.connected = False
+		if self.StopConnectionAttempts:
+			return
 
 		if not self.QuietConnectionError:
 			indigo.server.log("connecting to InfluxDB... " + self.InfluxHost + ":" + self.InfluxHTTPPort + " using user account: " + self.InfluxUser)
+
+		self.connected = False
 
 		self.connection = InfluxDBClient(
 			host=self.InfluxHost,
@@ -178,13 +182,20 @@ class Plugin(indigo.PluginBase):
 			self.pollingInterval = FAST_POLLING_INTERVAL
 			
 			# Check to see if there is a admin user account issue, and, if so, trigger a admin refresh.
-			if "admin user" in str(e).lower():
+			if "authorization failed" in str(e).lower() and not self.QuietConnectionError:
+				self.logger.error("error while connecting to InfluxDB: authorization failed.")
+				self.StopConnectionAttempts = True
+				self.QuietConnectionError = True
+			elif "authorization failed" in str(e).lower():
+				self.StopConnectionAttempts = True
+				self.QuietConnectionError = True				
+			elif "admin user" in str(e).lower():
 				self.logger.debug("detected that there is something wrong with the admin account, triggering a refresh")
 				indigo.server.log("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
 				self.triggerInfluxAdminReset = True					
 				self.triggerInfluxRestart = True			
 
-			if not self.QuietConnectionError:
+			elif not self.QuietConnectionError:
 				self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
 				self.QuietConnectionError = True
 
@@ -434,11 +445,15 @@ class Plugin(indigo.PluginBase):
 			self.StartGrafanaServer()
 			self.QuietNoGrafanaConfigured = False
 
-		if not self.connected and not self.QuietNoGrafanaConfigured:
+		if not self.connected and not self.QuietNoGrafanaConfigured and not self.DisableGrafana:
 			self.logger.debug("not currently connected to any InfluxDB, so will not start the Grafana Server")
 			self.QuietNoGrafanaConfigured = True
 
 	def restartGrafana(self):
+		if self.DisableGrafana:
+			self.logger.debug("not going to restart Grafana, since it's disabled")
+			return
+
 		indigo.server.log("######## About to (re) start Grafana.  Please be patient while this happens. ########")
 		self.StopGrafanaServer()
 
@@ -476,6 +491,11 @@ class Plugin(indigo.PluginBase):
 				os.kill(pid, signal.SIGKILL)		
 
 	def StartInfluxServer(self):
+		self.logger.debug("running StartInfluxServer()")
+		if self.ExternalDB:
+			self.logger.debug("   not starting the Influx server because an ExternalDB is configured")
+			return
+
 		if not os.path.isfile(self.influxConfigFileLoc):
 			self.logger.error("please check your config, config file does not exist")
 			self.triggerInfluxReset = True
@@ -526,6 +546,7 @@ class Plugin(indigo.PluginBase):
 				self.pollingInterval = DEFAULT_POLLING_INTERVAL	
 
 				self.connect()
+				self.logger.debug("completed StartInfluxServer()")
 				return True
 				
 			loopcount = loopcount + 1
@@ -613,6 +634,10 @@ class Plugin(indigo.PluginBase):
 				os.kill(pid, signal.SIGKILL)		
 
 	def checkServerStatus(self):
+
+		if self.ExternalDB and self.DisableGrafana:
+			return
+
 		self.logger.debug("running checkServerStatus()")
 		influxResult = self.checkRunningServer(self.InfluxHTTPPort)
 		grafanaResult = self.checkRunningServer(self.GrafanaPort)
@@ -627,7 +652,7 @@ class Plugin(indigo.PluginBase):
 		else:
 			self.InfluxServerStatus = "stopped"
 
-		if influxResult and self.connected and not grafanaResult and not self.triggerGrafanaRestart and self.GrafanaServerStartFailureCount <= 5:
+		if influxResult and not self.DisableGrafana and self.connected and not grafanaResult and not self.triggerGrafanaRestart and self.GrafanaServerStartFailureCount <= 5:
 			self.logger.debug("   found that Grafana is not running, triggering a restart")
 			self.triggerGrafanaRestart = True
 
@@ -688,6 +713,10 @@ class Plugin(indigo.PluginBase):
 			indigo.server.log("config file for Grafana has been updated; server will restart shortly.")
 
 	def DeleteInfluxAdmin(self, user):
+		if self.ExternalDB:
+			self.logger.debug("not going to delete Influx admin, because the plugin is configured for a external Influx server")
+			return
+
 		self.logger.debug("droping database user: " + user)
 		if self.connected:
 			try:
@@ -700,6 +729,10 @@ class Plugin(indigo.PluginBase):
 		return False
 
 	def CreateInfluxAdmin(self):
+		if self.ExternalDB:
+			self.logger.debug("not going to create Influx admin, because the plugin is configured for a external Influx server")
+			return
+
 		self.StopInfluxServer()
 
 		self.CreateInfluxConfig(RequireAuth = False)
@@ -905,6 +938,7 @@ class Plugin(indigo.PluginBase):
 				self.InfluxHost = valuesDict['InfluxHost']
 			else:
 				self.InfluxHost = "localhost"
+				valuesDict['InfluxHost'] = "localhost"
 
 			if self.InfluxPort != valuesDict['InfluxPort']:
 				self.InfluxPort = valuesDict['InfluxPort']
@@ -915,16 +949,19 @@ class Plugin(indigo.PluginBase):
 				InfluxServerChanged = True
 
 			# Here we have to detect if the admin accounts had changed
-			if ExternalInfluxDBServerChanged or (not self.ExternalDB and (valuesDict['InfluxUser'] != self.InfluxUser or self.InfluxPassword != valuesDict['InfluxPassword'])):
-				if len(self.InfluxUser) == 0:
+			if ExternalInfluxDBServerChanged or (valuesDict['InfluxUser'] != self.InfluxUser or self.InfluxPassword != valuesDict['InfluxPassword']):
+				if len(self.InfluxUser) == 0 and not self.ExternalDB:
 					indigo.server.log("first time setup -- config will now be created for InfluxDB.  The InfluxDB server will restart a few times, once that is complete, Grafana will start.")
-				else:
+				elif not self.ExternalDB:
 					indigo.server.log("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
 
 				InfluxServerChanged = True
-				self.triggerInfluxAdminReset = True
-				self.pollingInterval = FAST_POLLING_INTERVAL
-				self.DeleteInfluxAdmin(self.InfluxUser)
+
+				if not self.ExternalDB:
+					self.triggerInfluxAdminReset = True
+					self.pollingInterval = FAST_POLLING_INTERVAL
+					self.DeleteInfluxAdmin(self.InfluxUser)
+
 				self.InfluxUser = valuesDict['InfluxUser']
 				self.InfluxPassword = valuesDict['InfluxPassword']
 	
@@ -968,6 +1005,7 @@ class Plugin(indigo.PluginBase):
 
 			# if a change was made to the Influx credentials and we are using a external server, simply reconnect
 			if self.ExternalDB and InfluxServerChanged:
+				self.StopConnectionAttempts = False
 				self.connect()
 
 			self.miniumumUpdateFrequency = int(valuesDict["MinimumUpdateFrequency"])
