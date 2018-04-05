@@ -145,7 +145,7 @@
 	<Field id="IncStatesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>States to include from all devices (number in parens indicates the number of devices that share this state)
 
-			Note: The states that are selected/highligted in this box are ignored.  Any state listed in this box will be included.  States can be removed by highlighting and clicking the "remove selected states" button.
+			Note: State highlighting / selection in this box are ignored when you leave and enter the configuration dialog.  Any state listed in this box will be included as a "included state".  The selection ability is used only for removing of states, which can be done one at a time, or in bulk holding shift or the command key.  To remove the selected state(s), click the "remove selected state(s)" button.
 		</Label>
 	</Field>
 

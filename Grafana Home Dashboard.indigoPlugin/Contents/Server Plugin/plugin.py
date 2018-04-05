@@ -344,7 +344,7 @@ class Plugin(indigo.PluginBase):
 
 			# if the device is excluded, do nothing
 			if dev.id in self.DeviceExcludeList:
-				if self.TransportDebug:
+				if self.TransportDebugL2:
 					self.logger.debug("device was excluded from InfluxDB update: " + dev.name)
 				continue
 
@@ -359,7 +359,7 @@ class Plugin(indigo.PluginBase):
 						needsUpdating = True
 						devSearch[1] = datetime.datetime.now()
 
-					break
+					break  # STOP THE search through the update list
 
 			if not found:
 				self.DeviceLastUpdatedList.append([dev.id, dev.lastChanged])
@@ -370,6 +370,8 @@ class Plugin(indigo.PluginBase):
 
 			if needsUpdating:
 				self.DeviceToInflux(dev, False)
+			elif self.TransportDebugL2 and not needsUpdating:
+				self.logger.debug("no update needed for device: " + dev.name)
 
 		for var in indigo.variables:
 			needsUpdating = False
@@ -1282,7 +1284,17 @@ class Plugin(indigo.PluginBase):
 					else:
 						status = " (NOT INCLUDED)"
 
-					indigo.server.log("   " + str(kk) + ": " + str(vv) + status)
+					# Value conversion
+					value = None
+
+					if isinstance(vv, str):
+						value = vv
+					elif isinstance(vv, unicode):
+						value = vv.encode('utf-8')
+					else:
+						value = str(vv)
+
+					indigo.server.log("   " + str(kk) + ": " + value + status)
 
 		return valuesDict
 
@@ -1306,7 +1318,17 @@ class Plugin(indigo.PluginBase):
 						else:
 							status = " (NOT INCLUDED)"
 
-						indigo.server.log("   " + str(counter) + ". " + dev.name + " ;  " + str(kk) + ": " + str(vv) + status)
+						# Value conversion
+						value = None
+
+						if isinstance(vv, str):
+							value = vv
+						elif isinstance(vv, unicode):
+							value = vv.encode('utf-8')
+						else:
+							value = str(vv)
+
+						indigo.server.log("   " + str(counter) + ". " + dev.name + " ;  " + str(kk) + ": " + value + status)
 						counter = counter + 1
 
 		return valuesDict
