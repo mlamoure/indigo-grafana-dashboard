@@ -20,11 +20,13 @@ import subprocess
 from subprocess import check_output
 import socket
 import signal
+from ghpu import GitHubPluginUpdater
 
-WAIT_POLLING_INTERVAL = 5
+WAIT_POLLING_INTERVAL = 5 # used ocassionally to wait for a sequantal process to happen
 FAST_POLLING_INTERVAL = 5
 DEFAULT_POLLING_INTERVAL = 60  # number of seconds between each poll
 UPDATE_STATES_LIST = 15 # how frequently (in minutes) to update the state list
+DEFAULT_UPDATE_FREQUENCY = 24 # frequency of update check, in hours
 
 DEFAULT_STATES = ["state.onOffState", "model", "subModel", "deviceTypeId", "state.hvac_state", "onState", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
@@ -80,13 +82,17 @@ class Plugin(indigo.PluginBase):
 		self.LastConfigRefresh = datetime.datetime.now()
 		self.lastInfluxConfigCheck = datetime.datetime.now()
 
+		self.updater = GitHubPluginUpdater(self)
+		self.updater.checkForUpdate(str(self.pluginVersion))
+		self.lastUpdateCheck = datetime.datetime.now()			
+
 	def startup(self):
 		try:
 			self.InfluxHost = self.pluginPrefs.get('InfluxHost', 'localhost')
 			self.InfluxPort = self.pluginPrefs.get('InfluxPort', '8088')
 			self.InfluxHTTPPort = self.pluginPrefs.get('InfluxHTTPPort', '8086')
-			self.InfluxUser = self.pluginPrefs.get('InfluxUser', '')
-			self.InfluxPassword = self.pluginPrefs.get('InfluxPassword', '')
+			self.InfluxUser = self.pluginPrefs.get('InfluxUser', 'indigo')
+			self.InfluxPassword = self.pluginPrefs.get('InfluxPassword', 'indigo')
 			self.InfluxDB = self.pluginPrefs.get('InfluxDB', 'indigo')
 			self.GrafanaPort = self.pluginPrefs.get('GrafanaPort', '3006')
 			self.ExternalDB = self.pluginPrefs.get('ExternalDB', False)
@@ -315,6 +321,11 @@ class Plugin(indigo.PluginBase):
 
 					if self.connected:
 						self.UpdateAll()
+
+					# check for plugin updates
+					if self.lastUpdateCheck < datetime.datetime.now()-datetime.timedelta(hours=DEFAULT_UPDATE_FREQUENCY):
+						self.updater.checkForUpdate(str(self.pluginVersion))
+						self.lastUpdateCheck = datetime.datetime.now()		
 
 				except Exception as e:
 					if self.debug:
@@ -1335,3 +1346,19 @@ class Plugin(indigo.PluginBase):
 						counter = counter + 1
 
 		return valuesDict
+
+	def checkForUpdates(self):
+		self.updater.checkForUpdate()
+
+	def updatePlugin(self):
+		self.updater.update()
+
+	def rebuildInflux(self):
+		indigo.server.log("rebuilding the InfluxDB server (will not delete data).  The server will restart several times for this process to complete.")
+		self.triggerInfluxRestart = True
+		self.CreateInfluxAdmin()
+
+	def rebuildGrafana(self):
+		indigo.server.log("rebuilding the Grafana server (will not delete data).  The server will restart once this is complete.")
+		self.triggerGrafanaRestart = True
+		self.CreateGrafanaConfig()

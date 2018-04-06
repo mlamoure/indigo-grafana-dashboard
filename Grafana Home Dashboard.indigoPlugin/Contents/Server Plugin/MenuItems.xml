@@ -1,6 +1,4 @@
 <?xml version="1.0"?>
-
-
 <MenuItems>
 	<MenuItem id="exporeDevice">
 	<Name>Explore device</Name>
@@ -35,5 +33,26 @@
 
 	</ConfigUI>
 	</MenuItem>
+    <MenuItem id="sep_server_repair"/>
+
+    <MenuItem id="rebuildInflux">
+        <Name>Rebuild and restart InfluxDB Server (will not delete data)</Name>
+        <CallbackMethod>rebuildInflux</CallbackMethod>
+    </MenuItem>
+    <MenuItem id="rebuildGrafana">
+        <Name>Rebuild and restart Grafana Server (will not delete data)</Name>
+        <CallbackMethod>rebuildGrafana</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="sep_update"/>
+
+    <MenuItem id="checkForUpdates">
+        <Name>Check for Updates</Name>
+        <CallbackMethod>checkForUpdates</CallbackMethod>
+    </MenuItem>
+    <MenuItem id="updatePlugin">
+        <Name>Update Plugin</Name>
+        <CallbackMethod>updatePlugin</CallbackMethod>
+    </MenuItem>
 
 </MenuItems>
