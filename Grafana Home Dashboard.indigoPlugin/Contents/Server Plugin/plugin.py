@@ -227,18 +227,21 @@ class Plugin(indigo.PluginBase):
 				unsent = False
 				self.QuietConnectionError = False
 			except InfluxDBClientError as e:
-				#print(str(e))
-				field = json.loads(e.content)['error'].split('"')[1]
-				#measurement = json.loads(e.content)['error'].split('"')[3]
-				retry = json.loads(e.content)['error'].split('"')[4].split()[7]
-				if retry == 'integer':
-					retry = 'int'
-				if retry == 'string':
-					retry = 'str'
-				# float is already float
-				# now we know to try to force this field to this type forever more
-				self.adaptor.typecache[field] = retry
+				self.logger.debug("Influx client error: " + str(e))
+
 				try:
+
+					field = json.loads(e.content)['error'].split('"')[1]
+					#measurement = json.loads(e.content)['error'].split('"')[3]
+					retry = json.loads(e.content)['error'].split('"')[4].split()[7]
+					if retry == 'integer':
+						retry = 'int'
+					if retry == 'string':
+						retry = 'str'
+					# float is already float
+					# now we know to try to force this field to this type forever more
+					self.adaptor.typecache[field] = retry
+
 					newcode = '%s("%s")' % (retry, str(json_body[0]['fields'][field]))
 					#indigo.server.log(newcode)
 					json_body[0]['fields'][field] = eval(newcode)
