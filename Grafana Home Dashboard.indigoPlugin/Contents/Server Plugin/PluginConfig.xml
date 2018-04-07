@@ -61,7 +61,7 @@
 					 <Label>InfluxDB External Server Host:</Label>
 		</Field>
 
-		<Field id="SSL" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox" enabledBindingId="ExternalDB" enabledBindingValue="true">
+		<Field id="InfluxSSL" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox" enabledBindingId="ExternalDB" enabledBindingValue="true">
 				<Label>Use SSL</Label>
 				<Description>Enable</Description>
 		</Field>

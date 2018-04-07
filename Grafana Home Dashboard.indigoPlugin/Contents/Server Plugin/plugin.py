@@ -963,6 +963,8 @@ class Plugin(indigo.PluginBase):
 			else:
 				self.InfluxHost = "localhost"
 				valuesDict['InfluxHost'] = "localhost"
+				self.InfluxSSL = False
+				valuesDict['InfluxSSL'] = False
 
 			if self.InfluxPort != valuesDict['InfluxPort']:
 				self.InfluxPort = valuesDict['InfluxPort']
