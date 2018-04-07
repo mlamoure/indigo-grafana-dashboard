@@ -517,12 +517,11 @@ class Plugin(indigo.PluginBase):
 			return
 
 		if not os.path.isfile(self.influxConfigFileLoc):
-			self.logger.error("please check your config, config file does not exist")
-			self.triggerInfluxReset = True
+			self.rebuildInflux()
 			return
 
 		if self.InfluxDataLocation is None:
-			self.logger.error("please check your config, data location for Influx does not exist")
+			self.logger.error("please check your plugin configuration, data location for Influx does not exist")
 			self.badInfluxConfig = True
 			return
 
@@ -579,7 +578,7 @@ class Plugin(indigo.PluginBase):
 
 	def StartGrafanaServer(self):
 		if not os.path.isfile(self.GrafanaConfigFileLoc):
-			indigo.server.log("cannot start Grafana, please check your config")
+			self.rebuildGrafana()
 			return
 
 		if self.GrafanaDataLocation is None:
@@ -1364,11 +1363,11 @@ class Plugin(indigo.PluginBase):
 		self.updater.update()
 
 	def rebuildInflux(self):
-		indigo.server.log("rebuilding the InfluxDB server (will not delete data).  The server will restart several times for this process to complete.")
+		indigo.server.log("rebuilding the InfluxDB server (will not delete data).  This occurs when the plugin is updated or if you've asked to manually rebuild the InfluxDB server.  The InfluxDB server will restart several times for this process to complete.")
 		self.triggerInfluxRestart = True
 		self.CreateInfluxAdmin()
 
 	def rebuildGrafana(self):
-		indigo.server.log("rebuilding the Grafana server (will not delete data).  The server will restart once this is complete.")
+		indigo.server.log("rebuilding the Grafana server (will not delete data).  This occurs when the plugin is updated or if you've asked to manually rebuild the Grafana server.  The Grafana server will restart once this is complete.")
 		self.triggerGrafanaRestart = True
 		self.CreateGrafanaConfig()
