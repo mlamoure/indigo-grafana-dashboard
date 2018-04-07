@@ -37,6 +37,7 @@ class Plugin(indigo.PluginBase):
 		indigo.variables.subscribeToChanges()
 		self.connection = None
 		self.adaptor = None
+		self.configured = False
 
 		self.ConnectionRetryCount = 0
 		self.InfluxServerStartFailureCount = 0
@@ -129,6 +130,9 @@ class Plugin(indigo.PluginBase):
 
 		# this attempts to detect if the plugin is running for the first time
 		if len(self.StatesIncludeList) != 0:
+			self.configured = True
+
+		if self.configured:
 			self.restartAll()
 
 		self.BuildConfigurationLists()
@@ -561,6 +565,7 @@ class Plugin(indigo.PluginBase):
 				self.QuietNoInfluxConfigured = False
 				self.InfluxServerStartFailureCount = 0
 				self.triggerInfluxReset = False
+				self.StopConnectionAttempts = False
 				self.triggerInfluxRestart = False
 				self.pollingInterval = DEFAULT_POLLING_INTERVAL	
 
@@ -694,6 +699,7 @@ class Plugin(indigo.PluginBase):
 
 			if not os.path.isdir(self.GrafanaDataLocation):
 				self.logger.error("the Grafana data location does not exist, please check your configuration")
+				self.configured = False
 				return
 
 			if self.GrafanaServerStatus != "stopped":
@@ -798,6 +804,7 @@ class Plugin(indigo.PluginBase):
 
 			if not os.path.isdir(self.InfluxDataLocation):
 				self.logger.error("the InfluxDB data location does not exist, please check your configuration")
+				self.configured = False
 				return
 
 			if self.InfluxServerStatus != "stopped":
@@ -974,8 +981,8 @@ class Plugin(indigo.PluginBase):
 				InfluxServerChanged = True
 
 			# Here we have to detect if the admin accounts had changed
-			if ExternalInfluxDBServerChanged or (valuesDict['InfluxUser'] != self.InfluxUser or self.InfluxPassword != valuesDict['InfluxPassword']):
-				if len(self.InfluxUser) == 0 and not self.ExternalDB:
+			if ExternalInfluxDBServerChanged or valuesDict['InfluxUser'] != self.InfluxUser or self.InfluxPassword != valuesDict['InfluxPassword'] or not self.configured:
+				if not self.configured and not self.ExternalDB:
 					indigo.server.log("first time setup -- config will now be created for InfluxDB.  The InfluxDB server will restart a few times, once that is complete, Grafana will start.")
 				elif not self.ExternalDB:
 					indigo.server.log("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
@@ -1017,6 +1024,8 @@ class Plugin(indigo.PluginBase):
 
 			if not self.DisableGrafana and self.GrafanaServerStatus == "stopped":
 				GrafanaServerChanged = True
+
+			self.configured = True
 
 			if InfluxServerChanged and not self.ExternalDB:
 				self.logger.debug("identified that config properties for the InfluxDB Server have changed")
