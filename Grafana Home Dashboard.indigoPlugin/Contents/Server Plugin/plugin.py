@@ -89,6 +89,7 @@ class Plugin(indigo.PluginBase):
 	def startup(self):
 		try:
 			self.InfluxHost = self.pluginPrefs.get('InfluxHost', 'localhost')
+			self.InfluxSSL = self.pluginPrefs.get('InfluxSSL', False)
 			self.InfluxPort = self.pluginPrefs.get('InfluxPort', '8088')
 			self.InfluxHTTPPort = self.pluginPrefs.get('InfluxHTTPPort', '8086')
 			self.InfluxUser = self.pluginPrefs.get('InfluxUser', 'indigo')
@@ -157,7 +158,10 @@ class Plugin(indigo.PluginBase):
 			port=int(self.InfluxHTTPPort),
 			username=self.InfluxUser,
 			password=self.InfluxPassword,
-			database=self.InfluxDB)
+			database=self.InfluxDB,
+			ssl=self.InfluxSSL,
+			verify_ssl=self.InfluxSSL
+			)
 
 		try:
 			self.connection.create_database(self.InfluxDB)
@@ -951,7 +955,11 @@ class Plugin(indigo.PluginBase):
 				InfluxServerChanged = True
 
 			if self.ExternalDB:
+				if self.InfluxHost != valuesDict['InfluxHost'] or self.InfluxSSL != valuesDict['InfluxSSL']:
+					InfluxServerChanged = True
+
 				self.InfluxHost = valuesDict['InfluxHost']
+				self.InfluxSSL = valuesDict['InfluxSSL']
 			else:
 				self.InfluxHost = "localhost"
 				valuesDict['InfluxHost'] = "localhost"

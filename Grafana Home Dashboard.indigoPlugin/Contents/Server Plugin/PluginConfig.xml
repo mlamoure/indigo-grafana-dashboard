@@ -61,6 +61,11 @@
 					 <Label>InfluxDB External Server Host:</Label>
 		</Field>
 
+		<Field id="SSL" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox" enabledBindingId="ExternalDB" enabledBindingValue="true">
+				<Label>Use SSL</Label>
+				<Description>Enable</Description>
+		</Field>
+
 	<Field id="InfluxPortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>If using included InfluxDB server, this is the port that the server will be configured; if using an external InfluxDB Server, this is the port that the plugin will connect to.</Label>
 	</Field>
