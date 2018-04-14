@@ -15,7 +15,7 @@
 
 
 	<Field id="DirectoriesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>The two fields below specify where your Influx data and Grafana Dashboards will be stored on your Mac.  The InfluxDB Data Location should be on a Volume that has adequate storage.  These are the only required configuration values for this plugin to initially work unless you have a advanced configuration.  These directories must exist for the plugin to start up correctly.
+		<Label>The two fields below specify where your Influx data and Grafana Dashboards will be stored on your Mac.  The InfluxDB Data Location should be on a Volume that has adequate storage.  These are the only required configuration values for this plugin to initially work unless you have a advanced configuration.  The directories will attempt to be created for you if they do not exist.
 
 		InfluxDB Data Location: Influx is a time series database that will store your device log history so that it can be visualized in Grafana.  Depending on the configuration of this plugin, InfluxDB may archive 2-3GB of data per year (or more), based on how many devices you choose to send to InfluxDB (configuratble via the inclusion/exclusion plugin config dialog) and the data retention policy.  See the wiki document for more information.
 
