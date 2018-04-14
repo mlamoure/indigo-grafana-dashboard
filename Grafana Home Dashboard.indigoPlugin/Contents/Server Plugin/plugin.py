@@ -116,7 +116,9 @@ class Plugin(indigo.PluginBase):
 			self.DeviceIncludeList = self.pluginPrefs.get("listIncDevices", [])
 			self.DeviceExcludeList = self.pluginPrefs.get("listExclDevices", [])
 
+			# sets the default include states when the plugin has never been configured.
 			if len(self.StatesIncludeList) == 0:
+				self.configured = False
 				self.StatesIncludeList = DEFAULT_STATES[:]
 
 			self.adaptor = JSONAdaptor(self.logger, self.TransportDebug, self.TransportDebugL2, self.JSONDebug)
@@ -127,10 +129,6 @@ class Plugin(indigo.PluginBase):
 			else:
 				self.logger.error("missing proper configuration to start up.")
 			pass
-
-		# this attempts to detect if the plugin is running for the first time
-		if len(self.StatesIncludeList) != 0:
-			self.configured = True
 
 		if self.configured:
 			self.restartAll()
@@ -150,6 +148,9 @@ class Plugin(indigo.PluginBase):
 
 	def connect(self):
 		if self.StopConnectionAttempts:
+			return
+
+		if not self.configured:
 			return
 
 		if not self.QuietConnectionError:
@@ -183,7 +184,7 @@ class Plugin(indigo.PluginBase):
 			except Exception as e:
 				self.logger.debug("error while setting the retention policy: " + str(e))
 
-			indigo.server.log(u'connected to InfluxDB sucessfully...')
+			indigo.server.log(u'connected to InfluxDB sucessfully... plugin will now begin logging data to InfluxDB')
 			self.ConnectionRetryCount = 0
 			self.connected = True
 			self.QuietConnectionError = False
@@ -516,8 +517,17 @@ class Plugin(indigo.PluginBase):
 
 	def StartInfluxServer(self):
 		self.logger.debug("running StartInfluxServer()")
+
+		if not self.configured:
+			self.logger.debug("   not starting the Influx server because plugin is not yet configured")
+			return
+
 		if self.ExternalDB:
 			self.logger.debug("   not starting the Influx server because an ExternalDB is configured")
+			return
+
+		if self.badInfluxConfig:
+			self.logger.debug("   not starting the Influx server because badInfluxConfig is flagged")
 			return
 
 		if not os.path.isfile(self.influxConfigFileLoc):
@@ -659,6 +669,9 @@ class Plugin(indigo.PluginBase):
 
 	def checkServerStatus(self):
 
+		if not self.configured:
+			return
+
 		if self.ExternalDB and self.DisableGrafana:
 			return
 
@@ -695,7 +708,21 @@ class Plugin(indigo.PluginBase):
 		return False
 
 	def CreateGrafanaConfig(self):
-		if not self.DisableGrafana:
+		if not self.DisableGrafana and self.GrafanaDataLocation is not None:
+
+			try:
+				if not os.path.exists(self.GrafanaDataLocation):
+					os.makedirs(self.GrafanaDataLocation)
+			except Exception as e:
+				self.logger.error("error while creating the Grafana data location, please check your configuration")
+				self.logger.debug(str(e))
+				self.configured = False
+				return
+
+			if not os.path.exists(self.GrafanaDataLocation):
+				self.logger.error("the Grafana data location does not exist, please check your configuration")
+				self.configured = False
+				return
 
 			if not os.path.isdir(self.GrafanaDataLocation):
 				self.logger.error("the Grafana data location does not exist, please check your configuration")
@@ -758,9 +785,17 @@ class Plugin(indigo.PluginBase):
 			self.logger.debug("not going to create Influx admin, because the plugin is configured for a external Influx server")
 			return
 
+		if not self.configured or self.badInfluxConfig:
+			self.logger.debug("not going to create Influx admin, because the plugin is not configured correctly")
+			return
+
 		self.StopInfluxServer()
 
 		self.CreateInfluxConfig(RequireAuth = False)
+
+		if not self.configured or self.badInfluxConfig:
+			self.logger.debug("not going to proceed further in creating Influx admin, because the plugin is not configured correctly")
+			return
 	
 		self.StartInfluxServer()
 
@@ -800,11 +835,29 @@ class Plugin(indigo.PluginBase):
 		return False
 
 	def CreateInfluxConfig(self, RequireAuth = True):
-		if not self.ExternalDB:
+		if not self.ExternalDB and self.InfluxDataLocation is not None:
+			self.logger.debug("setting the InfluxDB data location to: " + self.InfluxDataLocation)
+
+			try:
+				if not os.path.exists(self.InfluxDataLocation):
+					os.makedirs(self.InfluxDataLocation)
+			except Exception as e:
+				self.logger.error("error while creating the InfluxDB data location, please check your configuration")
+				self.logger.debug(str(e))
+				self.configured = False
+				self.badInfluxConfig = True
+				return
+
+			if not os.path.exists(self.InfluxDataLocation):
+				self.logger.error("the InfluxDB data location does not exist, please check your configuration")
+				self.configured = False
+				self.badInfluxConfig = True
+				return
 
 			if not os.path.isdir(self.InfluxDataLocation):
 				self.logger.error("the InfluxDB data location does not exist, please check your configuration")
 				self.configured = False
+				self.badInfluxConfig = True
 				return
 
 			if self.InfluxServerStatus != "stopped":
