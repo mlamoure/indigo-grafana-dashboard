@@ -37,7 +37,7 @@ class Plugin(indigo.PluginBase):
 		indigo.variables.subscribeToChanges()
 		self.connection = None
 		self.adaptor = None
-		self.configured = False
+		self.configured = True
 
 		self.ConnectionRetryCount = 0
 		self.InfluxServerStartFailureCount = 0
@@ -96,11 +96,12 @@ class Plugin(indigo.PluginBase):
 			self.InfluxUser = self.pluginPrefs.get('InfluxUser', 'indigo')
 			self.InfluxPassword = self.pluginPrefs.get('InfluxPassword', 'indigo')
 			self.InfluxDB = self.pluginPrefs.get('InfluxDB', 'indigo')
-			self.GrafanaPort = self.pluginPrefs.get('GrafanaPort', '3006')
 			self.ExternalDB = self.pluginPrefs.get('ExternalDB', False)
 			self.GrafanaDataLocation = self.pluginPrefs.get('GrafanaDataLocation', None)
 			self.InfluxDataLocation = self.pluginPrefs.get('InfluxDataLocation', None)
+			self.GrafanaAnonymous = self.pluginPrefs.get('GrafanaAnonymous', False)
 			self.DisableGrafana = self.pluginPrefs.get('DisableGrafana', False)
+			self.GrafanaPort = self.pluginPrefs.get('GrafanaPort', '3006')
 			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
 			self.miniumumUpdateFrequency = int(self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60))
 
@@ -625,6 +626,10 @@ class Plugin(indigo.PluginBase):
 			if result:
 				indigo.server.log("######## Grafana server started. ########")
 				indigo.server.log ("You can now access your Indigo Home Dashboard via: http://localhost:" + self.GrafanaPort + " (or by using your Mac's IP address from another computer on your local network)")
+
+				if self.GrafanaAnonymous:
+					indigo.server.log ("    IMPORTANT: Grafana anonymous access is ENABLED.  Your server is not auth protected.")
+
 				self.GrafanaServerStatus = "started"
 				self.triggerGrafanaRestart = False
 				self.GrafanaServerStartFailureCount = 0
@@ -732,6 +737,8 @@ class Plugin(indigo.PluginBase):
 			if self.GrafanaServerStatus != "stopped":
 				self.StopGrafanaServer()
 
+			self.logger.debug("running CreateGrafanaConfig()")
+
 			GrafanaDefaultConfigFileLoc = os.getcwd() + '/servers/grafana/conf/defaults.ini'
 
 			if os.path.isfile(self.GrafanaConfigFileLoc):
@@ -742,10 +749,16 @@ class Plugin(indigo.PluginBase):
 			for line in fileinput.input(self.GrafanaConfigFileLoc, inplace=True):
 				if fileinput.lineno() == 15:
 					line = "data = " + self.GrafanaDataLocation + "\n"
-				if fileinput.lineno() == 18:
+					self.logger.debug("     setting Grafana data directory to: " + self.GrafanaDataLocation)
+				elif fileinput.lineno() == 18:
 					line = "logs = " + self.GrafanaDataLocation + "/log\n"
-				if fileinput.lineno() == 35:
+					self.logger.debug("     setting Grafana log directory to: " + self.GrafanaDataLocation + "/log")
+				elif fileinput.lineno() == 35:
 					line = "http_port = " + self.GrafanaPort + "\n"
+					self.logger.debug("     setting Grafana port to: " + self.GrafanaPort)
+				elif fileinput.lineno() == 243:
+					line = "enabled = " + str(self.GrafanaAnonymous).lower() + "\n"
+					self.logger.debug("     setting Grafana anonymous to: " + str(self.GrafanaAnonymous).lower())
 
 				sys.stdout.write(line)
 
@@ -762,6 +775,7 @@ class Plugin(indigo.PluginBase):
 				sys.stdout.write(line)
 
 			self.triggerGrafanaReset = False
+			self.logger.debug("completed CreateGrafanaConfig()")
 			indigo.server.log("config file for Grafana has been updated; server will restart shortly.")
 
 	def DeleteInfluxAdmin(self, user):
@@ -1060,6 +1074,10 @@ class Plugin(indigo.PluginBase):
 
 			if self.GrafanaDataLocation != valuesDict["GrafanaDataLocation"]:
 				self.GrafanaDataLocation = valuesDict["GrafanaDataLocation"]
+				GrafanaServerChanged = True
+
+			if self.GrafanaAnonymous != valuesDict["GrafanaAnonymous"]:
+				self.GrafanaAnonymous = valuesDict["GrafanaAnonymous"]
 				GrafanaServerChanged = True
 
 			if self.GrafanaPort != valuesDict["GrafanaPort"]:
@@ -1392,6 +1410,7 @@ class Plugin(indigo.PluginBase):
 			excluded = False
 			if dev.id in self.DeviceExcludeList:
 				excluded = True
+
 			### STATES List
 			for kk, vv in self.adaptor.to_json(dev).iteritems():
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):

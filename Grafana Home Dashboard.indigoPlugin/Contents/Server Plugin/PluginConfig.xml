@@ -16,10 +16,17 @@
 
 	<Field id="DirectoriesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>The two fields below specify where your Influx data and Grafana Dashboards will be stored on your Mac.  The InfluxDB Data Location should be on a Volume that has adequate storage.  These are the only required configuration values for this plugin to initially work unless you have a advanced configuration.  The directories will attempt to be created for you if they do not exist.
+		</Label>
+	</Field>
 
-		InfluxDB Data Location: Influx is a time series database that will store your device log history so that it can be visualized in Grafana.  Depending on the configuration of this plugin, InfluxDB may archive 2-3GB of data per year (or more), based on how many devices you choose to send to InfluxDB (configuratble via the inclusion/exclusion plugin config dialog) and the data retention policy.  See the wiki document for more information.
 
-		Grafana Data Location: Grafana does not store very much data.  It will keep any customizations to your dashboard in this location and minimal logs.
+	<Field id="DirectoriesInstruction2" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>InfluxDB Data Location: Influx is a time series database that will store your device log history so that it can be visualized in Grafana.  Depending on the configuration of this plugin, InfluxDB may archive 2-3GB of data per year (or more), based on how many devices you choose to send to InfluxDB (configuratble via the inclusion/exclusion plugin config dialog) and the data retention policy.  See the wiki document for more information.
+		</Label>
+	</Field>
+
+	<Field id="DirectoriesInstruction3" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>Grafana Data Location: Grafana does not store very much data.  It will keep any customizations to your dashboard in this location and minimal logs.
 		</Label>
 	</Field>
 
@@ -104,6 +111,8 @@
 				<Label>InfluxDB Database:</Label>
 		</Field>
 
+	<Field id="simpleSeparator3" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="separator"/>
+
 	<Field id="GrafanaDisableInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>Disables the internal Grafana Server in case you've brought your own instance of Grafana.</Label>
 	</Field>
@@ -112,9 +121,26 @@
 				<Label>Disable Included Grafana Server:</Label>
 		</Field>
 
+		<Field id="blank1" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+			<Label>
+			</Label>
+		</Field>
+
+		<Field id="GrafanaAnonymousInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+			<Label>Disables authentication to the Grafana server.  This is needed if you want to access Grafana panels from Indigo Control Pages.  Note that this reduces the security of this plugin.  The Grafana server is now open to anyone who has un-firewalled network access to your indigo machine.  Use carefully.
+			</Label>
+		</Field>
+
+		<Field id="GrafanaAnonymous" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox" enabledBindingId="DisableGrafana" enabledBindingNegate="true">
+				<Label>Allow anonymous access to Grafana</Label>
+				<Description>Enable</Description>
+		</Field>
+
 		<Field id="GrafanaPort" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="3006" tooltip="Port, default 3006" enabledBindingId="DisableGrafana" enabledBindingNegate="true">
 				<Label>Grafana Port:</Label>
 		</Field>
+
+	<Field id="simpleSeparator4" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="separator"/>
 
 		<Field id="ServerDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
 				<Label>Plugin and server debug</Label>
@@ -149,8 +175,11 @@
 
 	<Field id="IncStatesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>States to include from all devices (number in parens indicates the number of devices that share this state)
+		</Label>
+	</Field>
 
-			Note: State highlighting / selection in this box are ignored when you leave and enter the configuration dialog.  Any state listed in this box will be included as a "included state".  The selection ability is used only for removing of states, which can be done one at a time, or in bulk holding shift or the command key.  To remove the selected state(s), click the "remove selected state(s)" button.
+	<Field id="IncStatesInstruction2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>Note: State highlighting / selection in this box are ignored when you leave and enter the configuration dialog.  Any state listed in this box will be included as a "included state".  The selection ability is used only for removing of states, which can be done one at a time, or in bulk holding shift or the command key.  To remove the selected state(s), click the "remove selected state(s)" button.
 		</Label>
 	</Field>
 
@@ -236,9 +265,12 @@
 </Field>		
 
 	<Field id="MinumumUpdateInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" alignText="left" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>This field configures the minimum frequency of updates.  For each device that is sent to InfluxDB, if the device has not had a change in Indigo in the time period configured, the plugin will send an update to InfluxDB.    
+		<Label>This field configures the minimum frequency of updates.  For each device that is sent to InfluxDB, if the device has not had a change in Indigo in the time period configured, the plugin will send an update to InfluxDB.
+		</Label>
+	</Field>
 
-		This avoids the problem of missing data on the left side (especially for discrete graphs) for devices / variables that are updated infrequently. For example, if your HVAC turned on yesterday at 11:50pm and turns off at 11:59pm. Then it turns on today at 10am until 10:10:am. If you graph today only, Grafana doesn't know what the HVAC state was from midnight to 10am.
+	<Field id="MinumumUpdateInstruction2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" alignText="left" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>This avoids the problem of missing data on the left side (especially for discrete graphs) for devices / variables that are updated infrequently. For example, if your HVAC turned on yesterday at 11:50pm and turns off at 11:59pm. Then it turns on today at 10am until 10:10:am. If you graph today only, Grafana doesn't know what the HVAC state was from midnight to 10am.
 		</Label>
 	</Field>
 
