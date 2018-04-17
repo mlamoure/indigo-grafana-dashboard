@@ -154,7 +154,7 @@ class Plugin(indigo.PluginBase):
 		if not self.configured:
 			return
 
-		if not self.QuietConnectionError:
+		if not self.QuietConnectionError and (self.ExternalDB or self.debug):
 			indigo.server.log("connecting to InfluxDB... " + self.InfluxHost + ":" + self.InfluxHTTPPort + " using user account: " + self.InfluxUser)
 
 		self.connected = False
@@ -185,7 +185,9 @@ class Plugin(indigo.PluginBase):
 			except Exception as e:
 				self.logger.debug("error while setting the retention policy: " + str(e))
 
-			indigo.server.log(u'connected to InfluxDB sucessfully... plugin will now begin logging data to InfluxDB')
+			if self.ExternalDB or self.debug:
+				indigo.server.log("######## connected to InfluxDB sucessfully... plugin will now begin logging data to InfluxDB ########")
+
 			self.ConnectionRetryCount = 0
 			self.connected = True
 			self.QuietConnectionError = False
@@ -275,8 +277,7 @@ class Plugin(indigo.PluginBase):
 
 
 	def runConcurrentThread(self):
-		self.logger.debug("starting concurrent tread...")
-		indigo.server.log("fully initialized and ready...")
+		self.logger.debug("fully initiatlized and ready.  starting concurrent tread...")
 		self.sleep(int(self.pollingInterval))
 
 		try:
@@ -571,7 +572,7 @@ class Plugin(indigo.PluginBase):
 			time.sleep(WAIT_POLLING_INTERVAL)
 			result = self.checkRunningServer(self.InfluxPort)
 			if result:
-				indigo.server.log ("InfluxDB server started...")
+				indigo.server.log ("######## InfluxDB server started. ########")
 				self.InfluxServerStatus = "started"
 				self.QuietNoInfluxConfigured = False
 				self.InfluxServerStartFailureCount = 0
@@ -625,10 +626,10 @@ class Plugin(indigo.PluginBase):
 			result = self.checkRunningServer(self.GrafanaPort)
 			if result:
 				indigo.server.log("######## Grafana server started. ########")
-				indigo.server.log ("You can now access your Indigo Home Dashboard via: http://localhost:" + self.GrafanaPort + " (or by using your Mac's IP address from another computer on your local network)")
+				indigo.server.log ("    You can now access your Indigo Home Dashboard via: http://localhost:" + self.GrafanaPort + " (or by using your Mac's IP address from another computer on your local network)")
 
 				if self.GrafanaAnonymous:
-					indigo.server.log ("    IMPORTANT: Grafana anonymous access is ENABLED.  Your server is not auth protected.")
+					indigo.server.log ("    IMPORTANT: Your server is allowing anonymous, unauthenticated dashboard access for viewing your Grafana Server")
 
 				self.GrafanaServerStatus = "started"
 				self.triggerGrafanaRestart = False

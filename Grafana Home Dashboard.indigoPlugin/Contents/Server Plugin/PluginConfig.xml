@@ -127,7 +127,7 @@
 		</Field>
 
 		<Field id="GrafanaAnonymousInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-			<Label>Disables authentication to the Grafana server.  This is needed if you want to access Grafana panels from Indigo Control Pages.  Note that this reduces the security of this plugin.  The Grafana server is now open to anyone who has un-firewalled network access to your indigo machine.  Use carefully.
+			<Label>Disables authentication to the Grafana server.  This is needed if you want to access Grafana panels from Indigo Control Pages.  Note that this reduces the security of this plugin.  With this enabled, the Grafana server will allow anonymous, unauthenticated dashboard access for viewing your Grafana to anyone who has un-firewalled network access to your indigo machine.  Use carefully.
 			</Label>
 		</Field>
 
