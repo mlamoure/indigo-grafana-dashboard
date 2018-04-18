@@ -594,6 +594,8 @@ class Plugin(indigo.PluginBase):
 		self.triggerInfluxRestart = True
 
 	def StartGrafanaServer(self):
+		self.logger.debug("running StartGrafanaServer()")
+
 		if not os.path.isfile(self.GrafanaConfigFileLoc):
 			self.rebuildGrafana()
 			return
@@ -634,6 +636,7 @@ class Plugin(indigo.PluginBase):
 				self.GrafanaServerStatus = "started"
 				self.triggerGrafanaRestart = False
 				self.GrafanaServerStartFailureCount = 0
+				self.logger.debug("completed StartGrafanaServer()")
 				return True
 				
 			loopcount = loopcount + 1
@@ -652,6 +655,8 @@ class Plugin(indigo.PluginBase):
 			self.triggerGrafanaReset = True
 		else:
 			self.triggerGrafanaRestart = True
+
+		self.logger.debug("completed StartGrafanaServer()")
 
 	def StopGrafanaServer(self):
 		if self.DisableGrafana:
