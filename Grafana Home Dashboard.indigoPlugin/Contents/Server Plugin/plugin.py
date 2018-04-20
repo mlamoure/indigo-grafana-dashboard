@@ -185,13 +185,13 @@ class Plugin(indigo.PluginBase):
 			except Exception as e:
 				self.logger.debug("error while setting the retention policy: " + str(e))
 
-			if self.ExternalDB or self.debug:
-				indigo.server.log("######## connected to InfluxDB sucessfully... plugin will now begin logging data to InfluxDB ########")
+			if self.ExternalDB or self.debug or self.QuietConnectionError:
+				indigo.server.log("######## connected to InfluxDB sucessfully... plugin will now resume logging data to InfluxDB ########")
 
 			self.ConnectionRetryCount = 0
 			self.connected = True
 			self.QuietConnectionError = False
-			self.pollingInterval = DEFAULT_POLLING_INTERVAL			
+			self.pollingInterval = DEFAULT_POLLING_INTERVAL
 		
 		except Exception as e:
 			self.logger.debug("error while connecting to InfluxDB: " + str(e))
@@ -281,7 +281,6 @@ class Plugin(indigo.PluginBase):
 		self.sleep(int(self.pollingInterval))
 
 		try:
-			# Polling - As far as what is known, there is no subscription method using web standards available from August.
 			while True:
 				try:
 
