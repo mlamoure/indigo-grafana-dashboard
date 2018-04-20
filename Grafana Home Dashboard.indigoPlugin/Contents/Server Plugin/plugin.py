@@ -125,10 +125,9 @@ class Plugin(indigo.PluginBase):
 			self.adaptor = JSONAdaptor(self.logger, self.TransportDebug, self.TransportDebugL2, self.JSONDebug)
 
 		except Exception as e:
-			if self.debug:
-				self.logger.error("error on startup: " + str(e))
-			else:
-				self.logger.error("missing proper configuration to start up.")
+			self.logger.error("error on startup: " + str(e))
+			self.logger.error("missing proper configuration to start up.")
+			self.configured = False
 			pass
 
 		if self.configured:
@@ -148,10 +147,14 @@ class Plugin(indigo.PluginBase):
 		self.updater.update()
 
 	def connect(self):
+		self.logger.debug("running connect()")
+
 		if self.StopConnectionAttempts:
+			self.logger.debug("   StopConnectionAttempts = true")			
 			return
 
 		if not self.configured:
+			self.logger.debug("   configured = false")			
 			return
 
 		if not self.QuietConnectionError and (self.ExternalDB or self.debug):
@@ -186,7 +189,7 @@ class Plugin(indigo.PluginBase):
 				self.logger.debug("error while setting the retention policy: " + str(e))
 
 			if self.ExternalDB or self.debug or self.QuietConnectionError:
-				indigo.server.log("######## connected to InfluxDB sucessfully... plugin will now resume logging data to InfluxDB ########")
+				indigo.server.log("######## connected to InfluxDB successfully... plugin will now resume logging data to InfluxDB ########")
 
 			self.ConnectionRetryCount = 0
 			self.connected = True
@@ -204,7 +207,7 @@ class Plugin(indigo.PluginBase):
 				self.logger.error("error while connecting to InfluxDB: authorization failed.")
 				self.StopConnectionAttempts = True
 				self.QuietConnectionError = True
-			elif "authorization failed" in str(e).lower():
+			elif "authorization failed" in str(e).lower() or "max retries" in str(e).lower():
 				self.StopConnectionAttempts = True
 				self.QuietConnectionError = True				
 			elif "admin user" in str(e).lower():
@@ -212,7 +215,6 @@ class Plugin(indigo.PluginBase):
 				indigo.server.log("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
 				self.triggerInfluxAdminReset = True					
 				self.triggerInfluxRestart = True			
-
 			elif not self.QuietConnectionError:
 				self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
 				self.QuietConnectionError = True
@@ -221,6 +223,8 @@ class Plugin(indigo.PluginBase):
 			if (self.ConnectionRetryCount == 2 or self.ConnectionRetryCount%10 == 0) and not self.ExternalDB and not self.triggerInfluxRestart and not self.badInfluxConfig:
 				self.logger.debug("triggering a InfluxDB restart since connections are failing")
 				self.triggerInfluxRestart = True
+
+		self.logger.debug("completed connect()")
 
 	# send this a dict of what to write
 	def SendToInflux(self, tags, what, measurement='device_changes'):
@@ -1116,6 +1120,7 @@ class Plugin(indigo.PluginBase):
 			# if a change was made to the Influx credentials and we are using a external server, simply reconnect
 			if self.ExternalDB and InfluxServerChanged:
 				self.StopConnectionAttempts = False
+				self.QuietConnectionError = False
 				self.connect()
 
 			self.miniumumUpdateFrequency = int(valuesDict["MinimumUpdateFrequency"])
