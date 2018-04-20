@@ -28,7 +28,7 @@ DEFAULT_POLLING_INTERVAL = 60  # number of seconds between each poll
 UPDATE_STATES_LIST = 15 # how frequently (in minutes) to update the state list
 DEFAULT_UPDATE_FREQUENCY = 24 # frequency of update check, in hours
 
-DEFAULT_STATES = ["state.onOffState", "model", "subModel", "deviceTypeId", "state.hvac_state", "onState", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
+DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
 class Plugin(indigo.PluginBase):
 	def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
