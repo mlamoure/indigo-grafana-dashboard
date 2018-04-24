@@ -105,10 +105,9 @@ class Plugin(indigo.PluginBase):
 			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
 			self.miniumumUpdateFrequency = int(self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60))
 
-			self.ServerDebug = self.pluginPrefs.get("ServerDebug", False)
-			self.debug = self.ServerDebug
+			# Debug Preferences
+			self.debug = self.pluginPrefs.get("ServerDebug", False)
 			self.ConfigDebug = self.pluginPrefs.get("ConfigDebug", False)
-
 			self.TransportDebug = self.pluginPrefs.get("TransportDebug", False)
 			self.TransportDebugL2 = self.pluginPrefs.get("TransportDebugL2", False)
 			self.JSONDebug = self.pluginPrefs.get("JSONDebug", False)
@@ -125,7 +124,7 @@ class Plugin(indigo.PluginBase):
 			self.adaptor = JSONAdaptor(self.logger, self.TransportDebug, self.TransportDebugL2, self.JSONDebug)
 
 		except Exception as e:
-			self.logger.error("error on startup: " + str(e))
+			self.logger.debug("error on startup: " + str(e))
 			self.logger.error("missing proper configuration to start up.")
 			self.configured = False
 			pass
@@ -150,11 +149,11 @@ class Plugin(indigo.PluginBase):
 		self.logger.debug("running connect()")
 
 		if self.StopConnectionAttempts:
-			self.logger.debug("   StopConnectionAttempts = true")			
+			self.logger.debug("   haulting connect(); StopConnectionAttempts = true")			
 			return
 
 		if not self.configured:
-			self.logger.debug("   configured = false")			
+			self.logger.debug("   haulting connect(); configured = false")			
 			return
 
 		if not self.QuietConnectionError and (self.ExternalDB or self.debug):
@@ -169,7 +168,8 @@ class Plugin(indigo.PluginBase):
 			password=self.InfluxPassword,
 			database=self.InfluxDB,
 			ssl=self.InfluxSSL,
-			verify_ssl=self.InfluxSSL
+			verify_ssl=self.InfluxSSL,
+			timeout=5
 			)
 
 		try:
@@ -181,12 +181,12 @@ class Plugin(indigo.PluginBase):
 			else:
 				retain = str(int(self.InfluxRetention) * 30) + "d"
 
-			self.logger.debug("setting Influx retention policy of: " + retain)
+			self.logger.debug("    setting Influx retention policy of: " + retain)
 
 			try:
 				self.connection.create_retention_policy('indigo_policy', retain, '1')
 			except Exception as e:
-				self.logger.debug("error while setting the retention policy: " + str(e))
+				self.logger.debug("    error while setting the retention policy: " + str(e))
 
 			if self.ExternalDB or self.debug or self.QuietConnectionError:
 				indigo.server.log("######## connected to InfluxDB successfully... plugin will now resume logging data to InfluxDB ########")
@@ -197,31 +197,44 @@ class Plugin(indigo.PluginBase):
 			self.pollingInterval = DEFAULT_POLLING_INTERVAL
 		
 		except Exception as e:
-			self.logger.debug("error while connecting to InfluxDB: " + str(e))
 			self.ConnectionRetryCount = self.ConnectionRetryCount + 1
 			self.connected = False
+
+			self.logger.debug("   connection attempt " + str(self.ConnectionRetryCount) + ": error while connecting to InfluxDB: " + str(e))
+
+			# speed up the polling interval to make the connection attempts quicker
 			self.pollingInterval = FAST_POLLING_INTERVAL
 			
 			# Check to see if there is a admin user account issue, and, if so, trigger a admin refresh.
-			if "authorization failed" in str(e).lower() and not self.QuietConnectionError:
-				self.logger.error("error while connecting to InfluxDB: authorization failed.")
+			if "authorization failed" in str(e).lower():
+				if not self.QuietConnectionError:
+					self.logger.error("    error while connecting to InfluxDB: authorization failed.")
+	
 				self.StopConnectionAttempts = True
 				self.QuietConnectionError = True
-			elif "authorization failed" in str(e).lower() or "max retries" in str(e).lower():
-				self.StopConnectionAttempts = True
-				self.QuietConnectionError = True				
-			elif "admin user" in str(e).lower():
-				self.logger.debug("detected that there is something wrong with the admin account, triggering a refresh")
+			elif "admin user" in str(e).lower() and not self.ExternalDB:
+				self.logger.debug("    detected that there is something wrong with the admin account, triggering a refresh")
 				indigo.server.log("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
 				self.triggerInfluxAdminReset = True					
 				self.triggerInfluxRestart = True			
 			elif not self.QuietConnectionError:
-				self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
+				if not self.ExternalDB:
+					self.logger.error("error while connecting to InfluxDB, this can happen when the Indigo server is slow to start up.  Will continue to try silently in the background.")
+				else:
+					self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
+
 				self.QuietConnectionError = True
+			elif self.ConnectionRetryCount == 12:
+				if not self.ExternalDB:
+					self.logger.error("error while attempting to connect to internal InfluxDB Server after " + str(self.ConnectionRetryCount) + " attempts, stopping attempts.  Please check your configuration or contact support.  Error: " + str(e))
+				else:
+					self.logger.error("error while connecting to InfluxDB after " + str(self.ConnectionRetryCount) + " attempts, please check configuration.  Most recent connection error: " + str(e))
+
+				self.StopConnectionAttempts = True
 
 			# every 10 connection attempts retry starting the Influx server
 			if (self.ConnectionRetryCount == 2 or self.ConnectionRetryCount%10 == 0) and not self.ExternalDB and not self.triggerInfluxRestart and not self.badInfluxConfig:
-				self.logger.debug("triggering a InfluxDB restart since connections are failing")
+				self.logger.debug("    triggering a InfluxDB restart since connections are failing")
 				self.triggerInfluxRestart = True
 
 		self.logger.debug("completed connect()")
@@ -252,7 +265,6 @@ class Plugin(indigo.PluginBase):
 				self.logger.debug("Influx client error: " + str(e))
 
 				try:
-
 					field = json.loads(e.content)['error'].split('"')[1]
 					#measurement = json.loads(e.content)['error'].split('"')[3]
 					retry = json.loads(e.content)['error'].split('"')[4].split()[7]
@@ -267,9 +279,8 @@ class Plugin(indigo.PluginBase):
 					newcode = '%s("%s")' % (retry, str(json_body[0]['fields'][field]))
 					#indigo.server.log(newcode)
 					json_body[0]['fields'][field] = eval(newcode)
-				except ValueError:
+				except:
 					pass
-					#indigo.server.log('One of the columns just will not convert to its previous type. This means the database columns are just plain wrong.')
 			except ValueError:
 				self.logger.debug("unable to force a field to the type in Influx - a partial record was still written")
 			except Exception as e:
@@ -323,7 +334,7 @@ class Plugin(indigo.PluginBase):
 						self.restartGrafana()
 
 					# Check if Influx is not auth enabled
-					elif self.connected and self.lastInfluxConfigCheck + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now() and not self.CheckInfluxAuthConfig() and not self.ExternalDB:
+					elif self.connected and self.lastInfluxConfigCheck + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now() and not self.ExternalDB and not self.CheckInfluxAuthConfig():
 						self.lastInfluxConfigCheck = datetime.datetime.now()
 						self.logger.debug("scheduling a Influx admin reset since it was discovered that auth was disabled")
 						self.pollingInterval = FAST_POLLING_INTERVAL
@@ -480,11 +491,9 @@ class Plugin(indigo.PluginBase):
 			self.QuietNoGrafanaConfigured = True
 
 	def restartGrafana(self):
-		if self.DisableGrafana:
-			self.logger.debug("not going to restart Grafana, since it's disabled")
-			return
-
-		indigo.server.log("######## About to (re) start Grafana.  Please be patient while this happens. ########")
+		if not self.DisableGrafana:
+			indigo.server.log("######## About to (re) start Grafana.  Please be patient while this happens. ########")
+		
 		self.StopGrafanaServer()
 
 		if not self.DisableGrafana:
@@ -556,7 +565,7 @@ class Plugin(indigo.PluginBase):
 
 		if self.InfluxServerStartFailureCount > 1:
 			if not self.QuietNoInfluxConfigured:
-				self.logger.error("failed to start the Influx server after a rebuild, will not attempt again, please check your config and contact support on the Indigo forums")
+				self.logger.error("failed to start the Influx server after a rebuild, please check your config and contact support on the Indigo forums")
 	
 			self.triggerInfluxRestart = False
 			self.QuietNoInfluxConfigured = True
@@ -576,6 +585,9 @@ class Plugin(indigo.PluginBase):
 			result = self.checkRunningServer(self.InfluxPort)
 			if result:
 				indigo.server.log ("######## InfluxDB server started. ########")
+
+				time.sleep(WAIT_POLLING_INTERVAL)
+
 				self.InfluxServerStatus = "started"
 				self.QuietNoInfluxConfigured = False
 				self.InfluxServerStartFailureCount = 0
@@ -703,7 +715,7 @@ class Plugin(indigo.PluginBase):
 		else:
 			self.InfluxServerStatus = "stopped"
 
-		if influxResult and not self.DisableGrafana and self.connected and not grafanaResult and not self.triggerGrafanaRestart and self.GrafanaServerStartFailureCount <= 5:
+		if not self.DisableGrafana and self.connected and not grafanaResult and not self.triggerGrafanaRestart and self.GrafanaServerStartFailureCount <= 5:
 			self.logger.debug("   found that Grafana is not running, triggering a restart")
 			self.triggerGrafanaRestart = True
 
@@ -774,14 +786,14 @@ class Plugin(indigo.PluginBase):
 
 			# edit the default dashboard provisioning to include the default indigo dashboard
 
-			dashboard_yaml = os.getcwd() + '/servers/grafana/conf/provisioning/dashboards/sample.yaml'
-			provisioning_dashboards_location = os.getcwd() + "/servers/grafana/indigodashboard/"
-
-			for line in fileinput.input(dashboard_yaml, inplace=True):
-				if fileinput.lineno() == 10:
-					line = "     path: " + provisioning_dashboards_location
-
-				sys.stdout.write(line)
+#			dashboard_yaml = os.getcwd() + '/servers/grafana/conf/provisioning/dashboards/sample.yaml'
+#			provisioning_dashboards_location = os.getcwd() + "/servers/grafana/indigodashboard/"
+#
+#			for line in fileinput.input(dashboard_yaml, inplace=True):
+#				if fileinput.lineno() == 10:
+#					line = "     path: " + provisioning_dashboards_location
+#
+#				sys.stdout.write(line)
 
 			self.triggerGrafanaReset = False
 			self.logger.debug("completed CreateGrafanaConfig()")
@@ -1004,8 +1016,7 @@ class Plugin(indigo.PluginBase):
 			GrafanaServerChanged = False
 			ExternalInfluxDBServerChanged = False
 
-			self.ServerDebug = valuesDict["ServerDebug"]
-			self.debug = self.ServerDebug
+			self.debug = valuesDict["ServerDebug"]
 
 			self.ConfigDebug = valuesDict["ConfigDebug"]
 			self.TransportDebug = valuesDict["TransportDebug"]
