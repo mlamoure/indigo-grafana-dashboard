@@ -107,7 +107,6 @@ describe('templateSrv', function() {
       ]);
     });
 
-
     it('should replace $test with globbed value', function() {
       var target = _templateSrv.replace('this.$test.filters', {}, 'glob');
       expect(target).toBe('this.{value1,value2}.filters');
@@ -261,6 +260,11 @@ describe('templateSrv', function() {
       expect(result).toBe('test');
     });
 
+    it('multi value and csv format should render csv string', function() {
+      var result = _templateSrv.formatValue(['test', 'test2'], 'csv');
+      expect(result).toBe('test,test2');
+    });
+
     it('slash should be properly escaped in regex format', function() {
       var result = _templateSrv.formatValue('Gi3/14', 'regex');
       expect(result).toBe('Gi3\\/14');
@@ -278,7 +282,7 @@ describe('templateSrv', function() {
     });
   });
 
-  describe('can hightlight variables in string', function() {
+  describe('can highlight variables in string', function() {
     beforeEach(function() {
       initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
     });

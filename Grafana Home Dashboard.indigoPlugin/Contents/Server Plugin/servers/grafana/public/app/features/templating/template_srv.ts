@@ -115,6 +115,12 @@ export class TemplateSrv {
         }
         return this.distributeVariable(value, variable.name);
       }
+      case 'csv': {
+        if (_.isArray(value)) {
+          return value.join(',');
+        }
+        return value;
+      }
       default: {
         if (_.isArray(value)) {
           return '{' + value.join(',') + '}';
@@ -198,7 +204,7 @@ export class TemplateSrv {
       value = variable.current.value;
       if (this.isAllValue(value)) {
         value = this.getAllValue(variable);
-        // skip formating of custom all values
+        // skip formatting of custom all values
         if (variable.allValue) {
           return value;
         }
