@@ -1,6 +1,7 @@
 ///<reference path="../node_modules/grafana-sdk-mocks/app/headers/common.d.ts" />
 
 import config from 'app/core/config';
+import angular from 'angular';
 
 import {CanvasPanelCtrl} from './canvas-metric';
 import {DistinctPoints} from './distinct-points';
@@ -105,6 +106,7 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
     units: 'short',
   };
 
+  annotations: any = [];
   data: any = null;
   externalPT = false;
   isTimeline = true;
@@ -118,7 +120,7 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
   _renderDimensions: any = {};
   _selectionMatrix: Array<Array<String>> = [];
 
-  constructor($scope, $injector) {
+  constructor($scope, $injector, public annotationsSrv) {
     super($scope, $injector);
 
     // defaults configs
@@ -127,10 +129,12 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
 
     this.events.on('init-edit-mode', this.onInitEditMode.bind(this));
     this.events.on('render', this.onRender.bind(this));
-    this.events.on('data-received', this.onDataReceived.bind(this));
     this.events.on('panel-initialized', this.onPanelInitialized.bind(this));
-    this.events.on('data-error', this.onDataError.bind(this));
     this.events.on('refresh', this.onRefresh.bind(this));
+
+    this.events.on('data-received', this.onDataReceived.bind(this));
+    this.events.on('data-snapshot-load', this.onDataSnapshotLoad.bind(this));
+    this.events.on('data-error', this.onDataError.bind(this));
   }
 
   onPanelInitialized() {
@@ -138,7 +142,12 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
     this.onConfigChanged();
   }
 
+  onDataSnapshotLoad(snapshotData) {
+    this.onDataReceived(snapshotData);
+  }
+
   onDataError(err) {
+    this.annotations = [];
     console.log('onDataError', err);
   }
 
@@ -180,8 +189,11 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
     this._renderRects();
     this._renderTimeAxis();
     this._renderLabels();
+    this._renderAnnotations();
     this._renderSelection();
     this._renderCrosshair();
+
+    this.renderingCompleted();
   }
 
   showLegandTooltip(pos, info) {
@@ -284,8 +296,6 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
   onDataReceived(dataList) {
     $(this.canvas).css('cursor', 'pointer');
 
-    //    console.log('GOT', dataList);
-
     let data = [];
     _.forEach(dataList, metric => {
       if ('table' === metric.type) {
@@ -314,9 +324,30 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
     });
     this.data = data;
 
-    this.onRender();
-
-    //console.log( 'data', dataList, this.data);
+    // Annotations Query
+    this.annotationsSrv
+      .getAnnotations({
+        dashboard: this.dashboard,
+        panel: this.panel, // {id: 4}, //
+        range: this.range,
+      })
+      .then(
+        result => {
+          this.loading = false;
+          if (result.annotations && result.annotations.length > 0) {
+            this.annotations = result.annotations;
+          } else {
+            this.annotations = null;
+          }
+          this.onRender();
+        },
+        () => {
+          this.loading = false;
+          this.annotations = null;
+          this.onRender();
+          console.log('ERRR', this);
+        }
+      );
   }
 
   removeColorMap(map) {
@@ -509,6 +540,31 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
         }
         this.hoverPoint = hover;
 
+        if (this.annotations && !isExternal && this._renderDimensions) {
+          if (evt.pos.y > this._renderDimensions.rowsHeight - 5) {
+            let min = _.isUndefined(this.range.from) ? null : this.range.from.valueOf();
+            let max = _.isUndefined(this.range.to) ? null : this.range.to.valueOf();
+            let width = this._renderDimensions.width;
+
+            const anno = _.find(this.annotations, a => {
+              if (a.isRegion) {
+                return evt.pos.x > a.time && evt.pos.x < a.timeEnd;
+              }
+              const anno_x = (a.time - min) / (max - min) * width;
+              const mouse_x = evt.evt.offsetX;
+              return anno_x > mouse_x - 5 && anno_x < mouse_x + 5;
+            });
+            if (anno) {
+              console.log('TODO, hover <annotation-tooltip>', anno);
+              // See: https://github.com/grafana/grafana/blob/master/public/app/plugins/panel/graph/jquery.flot.events.js#L10
+              this.$tooltip
+                .html(anno.text)
+                .place_tt(evt.evt.pageX + 20, evt.evt.pageY + 5);
+              return;
+            }
+          }
+        }
+
         if (showTT) {
           this.externalPT = isExternal;
           this.showTooltip(evt, hover, isExternal);
@@ -537,7 +593,12 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
     }
   }
 
-  onMouseClicked(where) {
+  onMouseClicked(where, event) {
+    if (event.metaKey == true || event.ctrlKey == true) {
+      console.log('TODO? Create Annotation?', where, event);
+      return;
+    }
+
     let pt = this.hoverPoint;
     if (pt && pt.start) {
       let range = {from: moment.utc(pt.start), to: moment.utc(pt.start + pt.ms)};
@@ -546,7 +607,11 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
     }
   }
 
-  onMouseSelectedRange(range) {
+  onMouseSelectedRange(range, event) {
+    if (event.metaKey == true || event.ctrlKey == true) {
+      console.log('TODO? Create range annotation?', range, event);
+      return;
+    }
     this.timeSrv.setTime(range);
     this.clear();
   }
@@ -889,6 +954,10 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
     let xPos = headerColumnIndent + (nextPointInTime - min) / (max - min) * width;
 
     let timeFormat = this.time_format(max - min, timeResolution / 1000);
+    let displayOffset = 0;
+    if (this.dashboard.timezone == 'utc') {
+      displayOffset = new Date().getTimezoneOffset() * 60000;
+    }
 
     while (nextPointInTime < max) {
       // draw ticks
@@ -899,9 +968,9 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
       ctx.stroke();
 
       // draw time label
-      let date = new Date(nextPointInTime);
-      let dateStr = this.formatDate(date, timeFormat);
-      let xOffset = ctx.measureText(dateStr).width / 2;
+      const date = new Date(nextPointInTime + displayOffset);
+      const dateStr = this.formatDate(date, timeFormat);
+      const xOffset = ctx.measureText(dateStr).width / 2;
       ctx.fillText(dateStr, xPos - xOffset, top + 10);
 
       nextPointInTime += timeResolution;
@@ -940,6 +1009,127 @@ class DiscretePanelCtrl extends CanvasPanelCtrl {
       ctx.fillStyle = this.panel.crosshairColor;
       ctx.fill();
       ctx.lineWidth = 1;
+    }
+  }
+
+  _renderAnnotations() {
+    if (!this.panel.showTimeAxis) {
+      return;
+    }
+    if (!this.annotations) {
+      return;
+    }
+
+    const ctx = this.context;
+    const rows = this.data.length;
+    const rowHeight = this.panel.rowHeight;
+    const height = this._renderDimensions.height;
+    const width = this._renderDimensions.width;
+    const top = this._renderDimensions.rowsHeight;
+
+    const headerColumnIndent = 0; // header inset (zero for now)
+    ctx.font = this.panel.textSizeTime + 'px "Open Sans", Helvetica, Arial, sans-serif';
+    ctx.fillStyle = '#7FE9FF';
+    ctx.textAlign = 'left';
+    ctx.strokeStyle = '#7FE9FF';
+
+    ctx.textBaseline = 'top';
+    ctx.setLineDash([3, 3]);
+    ctx.lineDashOffset = 0;
+    ctx.lineWidth = 2;
+
+    let min = _.isUndefined(this.range.from) ? null : this.range.from.valueOf();
+    let max = _.isUndefined(this.range.to) ? null : this.range.to.valueOf();
+    let xPos = headerColumnIndent;
+
+    _.forEach(this.annotations, anno => {
+      ctx.setLineDash([3, 3]);
+
+      let isAlert = false;
+      if (anno.source.iconColor) {
+        ctx.fillStyle = anno.source.iconColor;
+        ctx.strokeStyle = anno.source.iconColor;
+      } else if (anno.annotation === undefined) {
+        // grafana annotation
+        ctx.fillStyle = '#7FE9FF';
+        ctx.strokeStyle = '#7FE9FF';
+      } else {
+        isAlert = true;
+        ctx.fillStyle = '#EA0F3B'; //red
+        ctx.strokeStyle = '#EA0F3B';
+      }
+
+      this._drawVertical(
+        ctx,
+        anno.time,
+        min,
+        max,
+        headerColumnIndent,
+        top,
+        width,
+        isAlert
+      );
+
+      //do the TO rangeMap
+      if (anno.isRegion) {
+        this._drawVertical(
+          ctx,
+          anno.timeEnd,
+          min,
+          max,
+          headerColumnIndent,
+          top,
+          width,
+          isAlert
+        );
+
+        //draw horizontal line at bottom
+        let xPosStart = headerColumnIndent + (anno.time - min) / (max - min) * width;
+        let xPosEnd = headerColumnIndent + (anno.timeEnd - min) / (max - min) * width;
+
+        // draw ticks
+        ctx.beginPath();
+        ctx.moveTo(xPosStart, top + 5);
+        ctx.lineTo(xPosEnd, top + 5);
+
+        ctx.lineWidth = 4;
+        ctx.setLineDash([]);
+        ctx.stroke();
+        //end horizontal
+        //do transparency
+        if (isAlert == false) {
+          ctx.save();
+          ctx.fillStyle = '#7FE9FF';
+          ctx.globalAlpha = 0.2;
+          ctx.fillRect(xPosStart, 0, xPosEnd - xPosStart, rowHeight);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    });
+  }
+
+  _drawVertical(ctx, timeVal, min, max, headerColumnIndent, top, width, isAlert) {
+    let xPos = headerColumnIndent + (timeVal - min) / (max - min) * width;
+
+    // draw ticks
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(xPos, top + 5);
+    ctx.lineTo(xPos, 0);
+    ctx.stroke();
+
+    // draw triangle
+    ctx.moveTo(xPos + 0, top);
+    ctx.lineTo(xPos - 5, top + 7);
+    ctx.lineTo(xPos + 5, top + 7);
+    ctx.fill();
+
+    // draw alert label
+    if (isAlert == true) {
+      let dateStr = '\u25B2';
+      let xOffset = ctx.measureText(dateStr).width / 2;
+      ctx.fillText(dateStr, xPos - xOffset, top + 10);
     }
   }
 }

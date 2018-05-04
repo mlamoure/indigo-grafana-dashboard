@@ -92,8 +92,9 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
             //(https://github.com/grafana/grafana/blob/master/PLUGIN_DEV.md)
             DiscretePanelCtrl = (function (_super) {
                 __extends(DiscretePanelCtrl, _super);
-                function DiscretePanelCtrl($scope, $injector) {
+                function DiscretePanelCtrl($scope, $injector, annotationsSrv) {
                     _super.call(this, $scope, $injector);
+                    this.annotationsSrv = annotationsSrv;
                     this.defaults = {
                         display: 'timeline',
                         rowHeight: 50,
@@ -122,6 +123,7 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                         legendSortBy: '-ms',
                         units: 'short',
                     };
+                    this.annotations = [];
                     this.data = null;
                     this.externalPT = false;
                     this.isTimeline = true;
@@ -138,16 +140,21 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                     this.panel.display = 'timeline'; // Only supported version now
                     this.events.on('init-edit-mode', this.onInitEditMode.bind(this));
                     this.events.on('render', this.onRender.bind(this));
-                    this.events.on('data-received', this.onDataReceived.bind(this));
                     this.events.on('panel-initialized', this.onPanelInitialized.bind(this));
-                    this.events.on('data-error', this.onDataError.bind(this));
                     this.events.on('refresh', this.onRefresh.bind(this));
+                    this.events.on('data-received', this.onDataReceived.bind(this));
+                    this.events.on('data-snapshot-load', this.onDataSnapshotLoad.bind(this));
+                    this.events.on('data-error', this.onDataError.bind(this));
                 }
                 DiscretePanelCtrl.prototype.onPanelInitialized = function () {
                     this.updateColorInfo();
                     this.onConfigChanged();
                 };
+                DiscretePanelCtrl.prototype.onDataSnapshotLoad = function (snapshotData) {
+                    this.onDataReceived(snapshotData);
+                };
                 DiscretePanelCtrl.prototype.onDataError = function (err) {
+                    this.annotations = [];
                     console.log('onDataError', err);
                 };
                 DiscretePanelCtrl.prototype.onInitEditMode = function () {
@@ -169,8 +176,10 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                     this._renderRects();
                     this._renderTimeAxis();
                     this._renderLabels();
+                    this._renderAnnotations();
                     this._renderSelection();
                     this._renderCrosshair();
+                    this.renderingCompleted();
                 };
                 DiscretePanelCtrl.prototype.showLegandTooltip = function (pos, info) {
                     var body = '<div class="graph-tooltip-time">' + info.val + '</div>';
@@ -258,7 +267,6 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                 DiscretePanelCtrl.prototype.onDataReceived = function (dataList) {
                     var _this = this;
                     jquery_1.default(this.canvas).css('cursor', 'pointer');
-                    //    console.log('GOT', dataList);
                     var data = [];
                     lodash_1.default.forEach(dataList, function (metric) {
                         if ('table' === metric.type) {
@@ -286,8 +294,28 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                         }
                     });
                     this.data = data;
-                    this.onRender();
-                    //console.log( 'data', dataList, this.data);
+                    // Annotations Query
+                    this.annotationsSrv
+                        .getAnnotations({
+                        dashboard: this.dashboard,
+                        panel: this.panel,
+                        range: this.range,
+                    })
+                        .then(function (result) {
+                        _this.loading = false;
+                        if (result.annotations && result.annotations.length > 0) {
+                            _this.annotations = result.annotations;
+                        }
+                        else {
+                            _this.annotations = null;
+                        }
+                        _this.onRender();
+                    }, function () {
+                        _this.loading = false;
+                        _this.annotations = null;
+                        _this.onRender();
+                        console.log('ERRR', _this);
+                    });
                 };
                 DiscretePanelCtrl.prototype.removeColorMap = function (map) {
                     var index = lodash_1.default.indexOf(this.panel.colorMaps, map);
@@ -460,6 +488,29 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                                 hover = this.data[j].changes[i];
                             }
                             this.hoverPoint = hover;
+                            if (this.annotations && !isExternal && this._renderDimensions) {
+                                if (evt.pos.y > this._renderDimensions.rowsHeight - 5) {
+                                    var min = lodash_1.default.isUndefined(this.range.from) ? null : this.range.from.valueOf();
+                                    var max = lodash_1.default.isUndefined(this.range.to) ? null : this.range.to.valueOf();
+                                    var width = this._renderDimensions.width;
+                                    var anno = lodash_1.default.find(this.annotations, function (a) {
+                                        if (a.isRegion) {
+                                            return evt.pos.x > a.time && evt.pos.x < a.timeEnd;
+                                        }
+                                        var anno_x = (a.time - min) / (max - min) * width;
+                                        var mouse_x = evt.evt.offsetX;
+                                        return anno_x > mouse_x - 5 && anno_x < mouse_x + 5;
+                                    });
+                                    if (anno) {
+                                        console.log('TODO, hover <annotation-tooltip>', anno);
+                                        // See: https://github.com/grafana/grafana/blob/master/public/app/plugins/panel/graph/jquery.flot.events.js#L10
+                                        this.$tooltip
+                                            .html(anno.text)
+                                            .place_tt(evt.evt.pageX + 20, evt.evt.pageY + 5);
+                                        return;
+                                    }
+                                }
+                            }
                             if (showTT) {
                                 this.externalPT = isExternal;
                                 this.showTooltip(evt, hover, isExternal);
@@ -488,7 +539,11 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                         this.$tooltip.detach(); // make sure it is hidden
                     }
                 };
-                DiscretePanelCtrl.prototype.onMouseClicked = function (where) {
+                DiscretePanelCtrl.prototype.onMouseClicked = function (where, event) {
+                    if (event.metaKey == true || event.ctrlKey == true) {
+                        console.log('TODO? Create Annotation?', where, event);
+                        return;
+                    }
                     var pt = this.hoverPoint;
                     if (pt && pt.start) {
                         var range = { from: moment_1.default.utc(pt.start), to: moment_1.default.utc(pt.start + pt.ms) };
@@ -496,7 +551,11 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                         this.clear();
                     }
                 };
-                DiscretePanelCtrl.prototype.onMouseSelectedRange = function (range) {
+                DiscretePanelCtrl.prototype.onMouseSelectedRange = function (range, event) {
+                    if (event.metaKey == true || event.ctrlKey == true) {
+                        console.log('TODO? Create range annotation?', range, event);
+                        return;
+                    }
                     this.timeSrv.setTime(range);
                     this.clear();
                 };
@@ -792,6 +851,10 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                     var nextPointInTime = this.roundDate(min, timeResolution) + timeResolution;
                     var xPos = headerColumnIndent + (nextPointInTime - min) / (max - min) * width;
                     var timeFormat = this.time_format(max - min, timeResolution / 1000);
+                    var displayOffset = 0;
+                    if (this.dashboard.timezone == 'utc') {
+                        displayOffset = new Date().getTimezoneOffset() * 60000;
+                    }
                     while (nextPointInTime < max) {
                         // draw ticks
                         ctx.beginPath();
@@ -800,7 +863,7 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                         ctx.lineWidth = 1;
                         ctx.stroke();
                         // draw time label
-                        var date = new Date(nextPointInTime);
+                        var date = new Date(nextPointInTime + displayOffset);
                         var dateStr = this.formatDate(date, timeFormat);
                         var xOffset = ctx.measureText(dateStr).width / 2;
                         ctx.fillText(dateStr, xPos - xOffset, top + 10);
@@ -836,6 +899,96 @@ System.register(['./canvas-metric', './distinct-points', 'lodash', 'jquery', 'mo
                         ctx.fillStyle = this.panel.crosshairColor;
                         ctx.fill();
                         ctx.lineWidth = 1;
+                    }
+                };
+                DiscretePanelCtrl.prototype._renderAnnotations = function () {
+                    var _this = this;
+                    if (!this.panel.showTimeAxis) {
+                        return;
+                    }
+                    if (!this.annotations) {
+                        return;
+                    }
+                    var ctx = this.context;
+                    var rows = this.data.length;
+                    var rowHeight = this.panel.rowHeight;
+                    var height = this._renderDimensions.height;
+                    var width = this._renderDimensions.width;
+                    var top = this._renderDimensions.rowsHeight;
+                    var headerColumnIndent = 0; // header inset (zero for now)
+                    ctx.font = this.panel.textSizeTime + 'px "Open Sans", Helvetica, Arial, sans-serif';
+                    ctx.fillStyle = '#7FE9FF';
+                    ctx.textAlign = 'left';
+                    ctx.strokeStyle = '#7FE9FF';
+                    ctx.textBaseline = 'top';
+                    ctx.setLineDash([3, 3]);
+                    ctx.lineDashOffset = 0;
+                    ctx.lineWidth = 2;
+                    var min = lodash_1.default.isUndefined(this.range.from) ? null : this.range.from.valueOf();
+                    var max = lodash_1.default.isUndefined(this.range.to) ? null : this.range.to.valueOf();
+                    var xPos = headerColumnIndent;
+                    lodash_1.default.forEach(this.annotations, function (anno) {
+                        ctx.setLineDash([3, 3]);
+                        var isAlert = false;
+                        if (anno.source.iconColor) {
+                            ctx.fillStyle = anno.source.iconColor;
+                            ctx.strokeStyle = anno.source.iconColor;
+                        }
+                        else if (anno.annotation === undefined) {
+                            // grafana annotation
+                            ctx.fillStyle = '#7FE9FF';
+                            ctx.strokeStyle = '#7FE9FF';
+                        }
+                        else {
+                            isAlert = true;
+                            ctx.fillStyle = '#EA0F3B'; //red
+                            ctx.strokeStyle = '#EA0F3B';
+                        }
+                        _this._drawVertical(ctx, anno.time, min, max, headerColumnIndent, top, width, isAlert);
+                        //do the TO rangeMap
+                        if (anno.isRegion) {
+                            _this._drawVertical(ctx, anno.timeEnd, min, max, headerColumnIndent, top, width, isAlert);
+                            //draw horizontal line at bottom
+                            var xPosStart = headerColumnIndent + (anno.time - min) / (max - min) * width;
+                            var xPosEnd = headerColumnIndent + (anno.timeEnd - min) / (max - min) * width;
+                            // draw ticks
+                            ctx.beginPath();
+                            ctx.moveTo(xPosStart, top + 5);
+                            ctx.lineTo(xPosEnd, top + 5);
+                            ctx.lineWidth = 4;
+                            ctx.setLineDash([]);
+                            ctx.stroke();
+                            //end horizontal
+                            //do transparency
+                            if (isAlert == false) {
+                                ctx.save();
+                                ctx.fillStyle = '#7FE9FF';
+                                ctx.globalAlpha = 0.2;
+                                ctx.fillRect(xPosStart, 0, xPosEnd - xPosStart, rowHeight);
+                                ctx.stroke();
+                                ctx.restore();
+                            }
+                        }
+                    });
+                };
+                DiscretePanelCtrl.prototype._drawVertical = function (ctx, timeVal, min, max, headerColumnIndent, top, width, isAlert) {
+                    var xPos = headerColumnIndent + (timeVal - min) / (max - min) * width;
+                    // draw ticks
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(xPos, top + 5);
+                    ctx.lineTo(xPos, 0);
+                    ctx.stroke();
+                    // draw triangle
+                    ctx.moveTo(xPos + 0, top);
+                    ctx.lineTo(xPos - 5, top + 7);
+                    ctx.lineTo(xPos + 5, top + 7);
+                    ctx.fill();
+                    // draw alert label
+                    if (isAlert == true) {
+                        var dateStr = '\u25B2';
+                        var xOffset = ctx.measureText(dateStr).width / 2;
+                        ctx.fillText(dateStr, xPos - xOffset, top + 10);
                     }
                 };
                 DiscretePanelCtrl.templateUrl = 'partials/module.html';

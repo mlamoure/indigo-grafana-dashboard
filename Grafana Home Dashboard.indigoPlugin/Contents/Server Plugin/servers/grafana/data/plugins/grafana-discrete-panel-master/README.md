@@ -18,18 +18,25 @@ choice to display string or boolean data
 To complie, run:
 
 ```
-npm install -g yarn
-yarn install --pure-lockfile
+npm install
 grunt
 ```
 
-To lint everything:
+#### Roadmap
 
-```
-yarn pretty
-```
+* TODO: full annotation support
+* TODO: better documentation
+* release v1.0
 
 #### Changelog
+
+##### v0.0.8
+
+* Support Snapshots (thanks @londonanthonyoleary)
+* Direct link rendered image now works.
+* Support UTC date display
+* Fix display issue with 5.1
+* Basic Annotation Support
 
 ##### v0.0.7
 
