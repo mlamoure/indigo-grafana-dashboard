@@ -1150,9 +1150,9 @@ class Plugin(indigo.PluginBase):
 	def ValidateConfigLists(self):
 		self.logger.debug("running ValidateConfigLists()")
 
-		try:
-			newDeviceIncludeList = []
-			for item in self.DeviceIncludeList:
+		newDeviceIncludeList = []
+		for item in self.DeviceIncludeList:
+			try:
 				if isinstance(item, basestring):
 					dev_id = int(item)
 				else:
@@ -1163,12 +1163,15 @@ class Plugin(indigo.PluginBase):
 					newDeviceIncludeList.append(dev_id)
 				else:
 					indigo.server.log("removed a no longer present device from include device list: " + str(item))
+			except Exception as e:
+				indigo.server.debug("removed a invalid device from the included device list, because of error: " + str(e))
+				continue
 
-			self.DeviceIncludeList = newDeviceIncludeList
-			self.pluginPrefs["listIncStates"] = self.DeviceIncludeList
+		self.DeviceIncludeList = newDeviceIncludeList
 
-			newStatesIncludeList = []
-			for item in self.StatesIncludeList:
+		newStatesIncludeList = []
+		for item in self.StatesIncludeList:
+			try:
 				if len(item) > 0:
 					# Find if the state exists in the full state list
 					try:
@@ -1184,12 +1187,15 @@ class Plugin(indigo.PluginBase):
 						indigo.server.log("removed a no longer present state from the state include list: " + str(item))
 				else:
 					self.logger.debug("   REMOVED a empty state??!")
+			except Exception as e:
+				self.logger.debug("removed a invalid state from the included state list, because of error: " + str(e))
+				continue
 
-			self.StatesIncludeList = newStatesIncludeList
-			self.pluginPrefs["listIncDevices"] = self.StatesIncludeList
+		self.StatesIncludeList = newStatesIncludeList
 
-			newDeviceExcludeList = []
-			for item in self.DeviceExcludeList:
+		newDeviceExcludeList = []
+		for item in self.DeviceExcludeList:
+			try:
 				if isinstance(item, basestring):
 					dev_id = int(item)
 				else:
@@ -1201,13 +1207,19 @@ class Plugin(indigo.PluginBase):
 				else:
 					indigo.server.log("removed a no longer present device from exclude device list: " + str(item))
 
-			self.DeviceExcludeList = newDeviceExcludeList
-			self.pluginPrefs["listExclDevices"] = self.DeviceExcludeList
+			except Exception as e:
+				self.logger.debug("removed a invalid device from the excluded device list, because of error: " + str(e))
+				continue
 
-			self.logger.debug("completed ValidateConfigLists()")
+		self.DeviceExcludeList = newDeviceExcludeList
 
-		except Exception as e:
-			self.logger.debug("error validating the plugin config, please report this error: " + str(e))
+
+		self.logger.debug("   saving the IncStates, IncDevices, ExclDevices lists to plugin preferences...")
+		self.pluginPrefs["listIncStates"] = self.StatesIncludeList
+		self.pluginPrefs["listIncDevices"] = self.DeviceIncludeList
+		self.pluginPrefs["listExclDevices"] = self.DeviceExcludeList
+
+		self.logger.debug("completed ValidateConfigLists()")
 
 	def BuildConfigurationLists(self):
 		self.logger.debug("starting BuildConfigurationLists()")
