@@ -1165,6 +1165,7 @@ class Plugin(indigo.PluginBase):
 					indigo.server.log("removed a no longer present device from include device list: " + str(item))
 
 			self.DeviceIncludeList = newDeviceIncludeList
+			self.pluginPrefs["listIncStates"] = self.DeviceIncludeList
 
 			newStatesIncludeList = []
 			for item in self.StatesIncludeList:
@@ -1185,6 +1186,7 @@ class Plugin(indigo.PluginBase):
 					self.logger.debug("   REMOVED a empty state??!")
 
 			self.StatesIncludeList = newStatesIncludeList
+			self.pluginPrefs["listIncDevices"] = self.StatesIncludeList
 
 			newDeviceExcludeList = []
 			for item in self.DeviceExcludeList:
@@ -1200,6 +1202,7 @@ class Plugin(indigo.PluginBase):
 					indigo.server.log("removed a no longer present device from exclude device list: " + str(item))
 
 			self.DeviceExcludeList = newDeviceExcludeList
+			self.pluginPrefs["listExclDevices"] = self.DeviceExcludeList
 
 			self.logger.debug("completed ValidateConfigLists()")
 
