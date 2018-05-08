@@ -9,7 +9,7 @@
 			<Label>Configure:</Label>
 			<List>
 				<Option value="server">Server configuration</Option>
-				<Option value="device">Device Inclusion / Exclusion Criteria</Option>
+				<Option value="device">Inclusion / Exclusion Criteria</Option>
 			</List>
 		</Field>			
 
@@ -90,7 +90,7 @@
 				<Label>InfluxDB HTTP Port:</Label>
 		</Field>
 
-	<Field id="InfluxUserInstruction" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+	<Field id="InfluxUserInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>If using included InfluxDB server, this is the admin user/password that will be created; if using an external InfluxDB Server, this is the user/password that the plugin will use to connect</Label>
 	</Field>
 
@@ -169,26 +169,44 @@
 
 <!-- THIS IS THE START TO THE INCLUSION CRITERIA CONFIGURATION -->
 
+	<Field id="IncCriteriaInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>How this works (Inclusion / Exclusion Critiera):</Label>
+	</Field>
+
+	<Field id="IncCriteriaInstruction2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>1) A excluded device will never have any information sent to Influx/Grafana.</Label>
+	</Field>
+
+	<Field id="IncCriteriaInstruction3" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>2) Included devices will have all of the device states sent to Influx/Grafana.</Label>
+	</Field>
+
+	<Field id="IncCriteriaInstruction4" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>3) All other devices will have only the global include states sent to Influx/Grafana.</Label>
+	</Field>
+
+	<Field id="simpleSeparator2-5" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="separator"/>
+
 <Field id="section2-1" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
-	<Label>Step 1. Include these state values for every device</Label>
+	<Label>Include specific states (for any device)</Label>
 </Field>		
 
 	<Field id="IncStatesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>States to include from all devices (number in parens indicates the number of devices that share this state)
+		<Label>States from this list will be sent to Influx/Grafana for all devices in your Indigo database, unless the device is excluded in the section below.  The device does not need to be added to the "Include specific device" section in order to be sent.
 		</Label>
 	</Field>
 
 	<Field id="IncStatesInstruction2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>Note: State highlighting / selection in this box are ignored when you leave and enter the configuration dialog.  Any state listed in this box will be included as a "included state".  The selection ability is used only for removing of states, which can be done one at a time, or in bulk holding shift or the command key.  To remove the selected state(s), click the "remove selected state(s)" button.
+		<Label>INSTRUCTIONS: State highlighting / selection in this box are ignored when you leave and enter the configuration dialog.  Any state listed in this box will be included as a "included state".  The selection ability is used only for removing of states, which can be done one at a time, or in bulk holding Shift or the Command key.  To add a state, select a state from the "Available States" drop down.  The number in parens indicates the number of devices that share this state, for informational purposes only.  To remove the selected state(s), click the "remove selected state(s)" button.
 		</Label>
 	</Field>
 
 		<Field type="list" id="listIncStates" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="" rows="12" alwaysUseInDialogHeightCalc="true">
-			<Label>Included States:</Label>
+			<Label>Global include States:</Label>
 			<List class="self" method="IncludedStatesListGenerator" dynamicReload="true" />
 		</Field>
 
-<Field id="removeStateButton" type="button" tooltip="Remove one or more states from teh state list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
+<Field id="removeStateButton" type="button" tooltip="Remove one or more states from the state list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
 	<Label></Label>
 	<Title>remove selected state(s)</Title>
 	<CallbackMethod>RemoveStateFromIncludedDeviceList</CallbackMethod>
@@ -214,11 +232,15 @@
 	<Field id="simpleSeparator2-2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="separator"/>
 
 <Field id="section2-2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
-	<Label>Step 2. Include all states from these devices</Label>
+	<Label>Include specific devices</Label>
 </Field>		
 
 	<Field id="IncDevsInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>Devices to include all states.  Hold the Command key to select multiple states.</Label>
+		<Label>Included devices will send ALL states for that device to the Influx database and Grafana.  It's good to include devices that have multiple, unique states that you want to be included in Influx/Grafana without adding each state individually.</Label>
+	</Field>
+
+	<Field id="IncDevsInstruction2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>INSTRUCTIONS: Add devices one by one using the "Available devices" drop down, and the "add device" button.  To remove a device, select it (or multiple using shift or command), and click the "remove selected device(s)" button.</Label>
 	</Field>
 
 		<Field type="list" id="listIncDevices" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="*" rows="12" alwaysUseInDialogHeightCalc="true">
@@ -246,15 +268,19 @@
 	<Field id="simpleSeparator2-3" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="separator"/>
 
 <Field id="section2-3" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
-	<Label>Step 3. Exclude these devices no matter what</Label>
+	<Label>Excluded devices</Label>
 </Field>		
 
 	<Field id="ExcDevsInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>Devices to exclude.  Good to exclude any devices that you will not analyize and that have frequently changing states that match the previous criteria.  Hold the Command or Shift key to select multiple items.</Label>
+		<Label>This section contains Devices to exclude.  Good to exclude any devices that you will not analyize and that have frequently changing states that match the previous criteria.</Label>
+	</Field>
+
+	<Field id="ExcDevsInstruction2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>INSTRUCTIONS: This section does not have a "button" like the Include Devices section.  Hilighted devices will be excluded.  This was done to make it easier to rapidly select a group of devices.  Hold the Command or Shift keys to quickly highlight multiple devices.</Label>
 	</Field>
 
 		<Field type="list" id="listExclDevices" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" defaultValue="" rows="12" alwaysUseInDialogHeightCalc="true">
-			<Label>Exclude Devices:</Label>
+			<Label>Exclude specific Devices:</Label>
 			<List class="self" method="ExcludedDeviceListGenerator" dynamicReload="true" />
 		</Field>
 
