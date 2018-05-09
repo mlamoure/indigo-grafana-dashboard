@@ -1,5 +1,85 @@
 <?xml version="1.0"?>
 <MenuItems>
+
+    <MenuItem id="filterValues">
+        <Name>Configure data filters (advanced)</Name>
+	<ConfigUI>
+		<Field id="FilterValuesInstruction" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+			<Label>You may create filters on a per property/state basis that apply to one, multiple, or all devices.  The filter only applies to numerical values.  Creating more than one filter for a property or device will require for the property/device combo to be within the approved range for all filters in order for it to pass on to InfluxDB.  If applying the filter fails because of a type error, the value is sent to InfluxDB.  This currently is only implemetned for devices.  Variables are not supported.
+			</Label>
+		</Field>
+
+		<Field type="menu" id="filterAction" defaultValue="add">
+			<Label>Action:</Label>
+			<List>
+				<Option value="add">Add new filter</Option>
+				<Option value="edit">Edit existing filter</Option>
+				<Option value="delete">Delete existing filter</Option>
+			</List>
+			<CallbackMethod>filterActionMenuChanged</CallbackMethod>
+		</Field>			
+
+		<Field type="list" id="listFilters" rows="6" alwaysUseInDialogHeightCalc="true" enabledBindingId="editMode" enabledBindingNegate="true">
+			<Label>Filters:</Label>
+			<List class="self" method="IncludedFiltersListGenerator" dynamicReload="true" />
+		</Field>
+
+		<Field id="buttonEditFilter" visibleBindingId="filterAction" visibleBindingValue="edit,delete" type="button" tooltip="" alwaysUseInDialogHeightCalc="true">
+			<Label></Label>
+			<Title>perform action on selected filter(s)</Title>
+			<CallbackMethod>FilterAction</CallbackMethod>
+		</Field>
+
+		<Field id="editMode" hidden="true" type="checkbox" defaultValue="true">
+				<Label></Label>
+				<Description></Description>
+		</Field>
+
+		<Field id="simpleSeparator1" type="separator"/>
+
+		<Field type="menu" id="filterProperty" visibleBindingId="filterAction" visibleBindingValue="add" enabledBindingId="editMode">
+			<Label>Select state/property:</Label>
+			<List class="self" method="AllStatesGenerator" dynamicReload="true" />
+		</Field>	
+
+		<Field id="filterPropertyMinValue" type="textfield" defaultValue="" visibleBindingId="filterAction" visibleBindingValue="edit,add" tooltip="minimum value" enabledBindingId="editMode">
+			<Label>Minimum value:</Label>
+		</Field>
+
+		<Field id="filterPropertyMaxValue" type="textfield" defaultValue="" visibleBindingId="filterAction" visibleBindingValue="edit,add" tooltip="maximum value" enabledBindingId="editMode">
+			<Label>Maximum value:</Label>
+		</Field>
+
+		<Field id="filterAllDevices" type="checkbox" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
+				<Label>Applies to all devices:</Label>
+				<Description>Enable</Description>
+		</Field>
+
+	<Field id="listDevicesInstruction" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>If selecting specific devices that this filter applies to, you may use the Command or Shift key to select multiple devices from this list.</Label>
+	</Field>
+
+		<Field type="list" id="listDevices" rows="12" alwaysUseInDialogHeightCalc="true" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="filterAllDevices" enabledBindingNegate="true">
+			<Label>Devices this filter applies to:</Label>
+			<List class="indigo.devices" dynamicReload="true" />
+		</Field>
+
+		<Field id="LogFailures" type="checkbox" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
+				<Label>Log failures to Indigo Event Log</Label>
+				<Description>Enable</Description>
+		</Field>
+
+		<Field id="buttonSaveFilterValues" type="button" tooltip="" visibleBindingId="filterAction" visibleBindingValue="edit,add" alwaysUseInDialogHeightCalc="true" enabledBindingId="editMode">
+			<Label></Label>
+			<Title>save</Title>
+			<CallbackMethod>SaveFilterValues</CallbackMethod>
+		</Field>
+
+	</ConfigUI>
+    </MenuItem>
+
+    <MenuItem id="sep_server_repair"/>
+
 	<MenuItem id="exporeDevice">
 	<Name>Explore device</Name>
 	<ButtonTitle>Close</ButtonTitle>
@@ -33,7 +113,7 @@
 
 	</ConfigUI>
 	</MenuItem>
-    <MenuItem id="sep_server_repair"/>
+    <MenuItem id="sep_server_advanced"/>
 
     <MenuItem id="rebuildInflux">
         <Name>Rebuild and restart InfluxDB Server (will not delete data)</Name>
@@ -42,6 +122,11 @@
     <MenuItem id="rebuildGrafana">
         <Name>Rebuild and restart Grafana Server (will not delete data)</Name>
         <CallbackMethod>rebuildGrafana</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="forceUpdate">
+        <Name>Force "Update All"</Name>
+        <CallbackMethod>ForceUpdate</CallbackMethod>
     </MenuItem>
 
     <MenuItem id="sep_update"/>

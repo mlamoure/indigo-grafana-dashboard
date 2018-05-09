@@ -268,7 +268,7 @@
 	<Field id="simpleSeparator2-3" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="separator"/>
 
 <Field id="section2-3" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
-	<Label>Excluded devices</Label>
+	<Label>Exclude specific devices</Label>
 </Field>		
 
 	<Field id="ExcDevsInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">

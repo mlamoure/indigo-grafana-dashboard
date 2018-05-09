@@ -10,6 +10,7 @@ import indigo
 import datetime
 import time
 import json
+import copy
 import os
 from json_adaptor import JSONAdaptor
 from influxdb import InfluxDBClient
@@ -115,6 +116,7 @@ class Plugin(indigo.PluginBase):
 			self.StatesIncludeList = self.pluginPrefs.get("listIncStates", [])
 			self.DeviceIncludeList = self.pluginPrefs.get("listIncDevices", [])
 			self.DeviceExcludeList = self.pluginPrefs.get("listExclDevices", [])
+			self.FilterList = self.pluginPrefs.get("listFilterList", [])
 
 			# sets the default include states when the plugin has never been configured.
 			if len(self.StatesIncludeList) == 0:
@@ -379,12 +381,12 @@ class Plugin(indigo.PluginBase):
 			found = False
 
 			if self.TransportDebugL2:
-				self.logger.debug("reviewing " + dev.name)
+				self.logger.debug("    reviewing " + dev.name)
 
 			# if the device is excluded, do nothing
 			if dev.id in self.DeviceExcludeList:
 				if self.TransportDebugL2:
-					self.logger.debug("device was excluded from InfluxDB update: " + dev.name)
+					self.logger.debug("    device was excluded from InfluxDB update: " + dev.name)
 				continue
 
 			for devSearch in self.DeviceLastUpdatedList:
@@ -393,7 +395,7 @@ class Plugin(indigo.PluginBase):
 
 					if devSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now():
 						if self.TransportDebug:
-							self.logger.debug("minimum update period for device expired: " + dev.name + ", prior update timestamp: " + str(devSearch[1]))
+							self.logger.debug("    minimum update period for device expired: " + dev.name + ", prior update timestamp: " + str(devSearch[1]))
 
 						needsUpdating = True
 						devSearch[1] = datetime.datetime.now()
@@ -403,14 +405,14 @@ class Plugin(indigo.PluginBase):
 			if not found:
 				self.DeviceLastUpdatedList.append([dev.id, dev.lastChanged])
 
-				if datetime.datetime.now() + datetime.timedelta(minutes=UPDATE_STATES_LIST) < self.LastConfigRefresh:
-					self.logger.debug("updating the states cache as it has gone stale")
-					self.BuildConfigurationLists()
+			if datetime.datetime.now() + datetime.timedelta(minutes=UPDATE_STATES_LIST) < self.LastConfigRefresh:
+				self.logger.debug("    updating the states cache as it has gone stale")
+				self.BuildConfigurationLists()
 
 			if needsUpdating:
 				self.DeviceToInflux(dev, False)
 			elif self.TransportDebugL2 and not needsUpdating:
-				self.logger.debug("no update needed for device: " + dev.name)
+				self.logger.debug("    no update needed for device: " + dev.name)
 
 		for var in indigo.variables:
 			needsUpdating = False
@@ -422,7 +424,7 @@ class Plugin(indigo.PluginBase):
 
 					if varSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now():
 						if self.TransportDebug:
-							self.logger.debug("minimum update period for variable expired: " + var.name + ", prior update timestamp: " + str(varSearch[1]))
+							self.logger.debug("    minimum update period for variable expired: " + var.name + ", prior update timestamp: " + str(varSearch[1]))
 
 						needsUpdating = True
 						varSearch[1] = datetime.datetime.now()
@@ -444,23 +446,21 @@ class Plugin(indigo.PluginBase):
 		if not self.connected:
 			return
 
-		if self.TransportDebugL2:
-			self.logger.debug("an update for device " + origDev.name + " is being processed...")
-
 		# If the device is excluded, do nothing
 		if newDev.id in self.DeviceExcludeList:
-			if self.TransportDebug:
-				self.logger.debug("device was excluded from InfluxDB update: " + newDev.name)
-
+			if self.TransportDebugL2:
+				self.logger.debug("   device was excluded from InfluxDB update: " + newDev.name)
 			return
 
 		device_was_updated = self.DeviceToInflux(newDev)
 
 		if not device_was_updated:
 			if self.JSONDebug:
-				self.logger.debug("an update for device " + origDev.name + " resulted in no properties updated...")
-
+				self.logger.debug("   an update for device " + origDev.name + " resulted in no properties updated...")
 			return
+
+		if self.TransportDebug:
+			self.logger.debug("deviceUpdated(): an update for device " + origDev.name + " is being processed...")
 
 		found = False
 		for devSearch in self.DeviceLastUpdatedList:
@@ -472,6 +472,9 @@ class Plugin(indigo.PluginBase):
 
 		if not found:
 			self.DeviceLastUpdatedList.append([origDev.name, datetime.datetime.now()])
+
+		if self.TransportDebug:
+			self.logger.debug("completed deviceUpdated() for " + origDev.name)
 
 	def restartAll(self):
 		self.StopInfluxServer()
@@ -859,7 +862,8 @@ class Plugin(indigo.PluginBase):
 		for line in content:
 			if line[0] == "[":
 				currentSection = line.rstrip()
-				self.logger.debug("now reviewing Influx config section: " + currentSection)
+				if self.ConfigDebug:
+					self.logger.debug("now reviewing Influx config section: " + currentSection)
 
 			if currentSection == "[http]" and "auth-enabled" in line:
 				if "true" in line:
@@ -962,8 +966,32 @@ class Plugin(indigo.PluginBase):
 		else:
 			newjson = self.adaptor.diff_to_json(dev, self.StatesIncludeList, updateCheck)
 
-		if newjson == None:
+		if newjson is None:
 			return False
+
+		filterjson = copy.deepcopy(newjson)
+
+		# Advanced filtering: Check if the values are within min and max range that was set
+		for kk, vv in filterjson.iteritems():
+			for state, minPropertyValue, maxPropertyValue, filterAllDevices, deviceList, log in self.FilterList:
+				if (dev.id in deviceList or filterAllDevices) and kk == state:
+					try:
+						if float(minPropertyValue) <= float(vv) <= float(maxPropertyValue):
+							if self.TransportDebug:
+								self.logger.debug("a value (" + str(vv) + ") for device " + dev.name + " was WITHIN the specified range (" + str(minPropertyValue) + ", " + str(maxPropertyValue) + ") and will not be sent to InfluxDB")
+						else:
+							if log:
+								self.logger.info("a value (" + str(vv) + ") for device " + dev.name + " was not in the configured range (" + str(minPropertyValue) + ", " + str(maxPropertyValue) + ") and will not be sent to InfluxDB")
+
+							del newjson[kk]
+
+					except:
+						self.logger.debug("there was a error while trying to filter based on the range")
+						self.logger.debug("   Key: " + str(kk))
+						self.logger.debug("   Value: " + str(vv))
+						self.logger.debug("   Device: " + str(dev.name))
+						self.logger.debug("   Min: " + str(minPropertyValue))
+						self.logger.debug("   Max: " + str(maxPropertyValue))
 
 		newtags = {}
 		for tag in tagnames:
@@ -1159,7 +1187,8 @@ class Plugin(indigo.PluginBase):
 					dev_id = item
 
 				if dev_id in indigo.devices:
-					self.logger.debug("   validated included device: " + indigo.devices[dev_id].name)
+					if self.ConfigDebug:
+						self.logger.debug("   validated included device: " + indigo.devices[dev_id].name)
 					newDeviceIncludeList.append(dev_id)
 				else:
 					indigo.server.log("removed a no longer present device from include device list: " + str(item))
@@ -1181,7 +1210,8 @@ class Plugin(indigo.PluginBase):
 						index = -1
 
 					if index != -1:
-						self.logger.debug("   validated included state: " + item)
+						if self.ConfigDebug:
+							self.logger.debug("   validated included state: " + item)
 						newStatesIncludeList.append(item)
 					else:
 						indigo.server.log("removed a no longer present state from the state include list: " + str(item))
@@ -1202,7 +1232,8 @@ class Plugin(indigo.PluginBase):
 					dev_id = item
 
 				if dev_id in indigo.devices:
-					self.logger.debug("   validated excluded device: " + indigo.devices[dev_id].name)
+					if self.ConfigDebug:
+						self.logger.debug("   validated excluded device: " + indigo.devices[dev_id].name)
 					newDeviceExcludeList.append(dev_id)
 				else:
 					indigo.server.log("removed a no longer present device from exclude device list: " + str(item))
@@ -1213,8 +1244,9 @@ class Plugin(indigo.PluginBase):
 
 		self.DeviceExcludeList = newDeviceExcludeList
 
-
-		self.logger.debug("   saving the IncStates, IncDevices, ExclDevices lists to plugin preferences...")
+		if self.ConfigDebug:
+			self.logger.debug("   saving the IncStates, IncDevices, ExclDevices lists to plugin preferences...")
+	
 		self.pluginPrefs["listIncStates"] = self.StatesIncludeList
 		self.pluginPrefs["listIncDevices"] = self.DeviceIncludeList
 		self.pluginPrefs["listExclDevices"] = self.DeviceExcludeList
@@ -1298,6 +1330,21 @@ class Plugin(indigo.PluginBase):
 
 		return toReturn
 
+	def IncludedFiltersListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
+		FilterListUI = []
+
+		for i in range(len(self.FilterList)):
+			if self.FilterList[i][3]:
+				appliesto = "(all devices)"
+			else:
+				appliesto = "(specific devices)"
+
+			values = "min: " + str(self.FilterList[i][1]) + ", max: " + str(self.FilterList[i][2])
+
+			FilterListUI.append((i, self.FilterList[i][0] + " " + appliesto + " " + values))
+
+		return FilterListUI
+
 	def IncludedDeviceListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
 		if self.ConfigDebug:
 			self.logger.debug("IncludedDeviceListGenerator()")
@@ -1333,8 +1380,8 @@ class Plugin(indigo.PluginBase):
 			self.logger.debug("self.AllStatesUI: " + str(self.AllStatesUI))
 
 		return self.AllStatesUI
-######
 
+######
 	def AddDeviceToIncludedDeviceList(self, valuesDict, typeId="", devId=0):
 		self.DeviceIncludeList.append(int(valuesDict["menuAvailableDevices"]))
 		self.DeviceIncludeListUI.append((valuesDict["menuAvailableDevices"], indigo.devices[int(valuesDict["menuAvailableDevices"])].name.replace(",", " ").replace(";", " ")))
@@ -1402,13 +1449,22 @@ class Plugin(indigo.PluginBase):
 	def PrintDeviceToEventLog(self, valuesDict, typeId=0, devId=0):
 		dev = indigo.devices[int(valuesDict["menuDevice"])]
 		excluded = False
+		included = False
 
 		if dev.id in self.DeviceExcludeList:
-			indigo.server.log("NOTE: Device \"" + dev.name + "\" is EXCLUDED in your config and therefore all states are EXCLUDED InfluxDB")
+			indigo.server.log("NOTE: Device \"" + dev.name + "\" is EXCLUDED in your config and therefore all states are sent to InfluxDB")
 			excluded = True
 
 		indigo.server.log("JSON representation of device " + dev.name + ":")
-		newjson = self.adaptor.diff_to_json(dev, [], False)
+
+		if dev.id in self.DeviceIncludeList and not excluded:
+			included = True
+			indigo.server.log("NOTE: Device \"" + dev.name + "\" is INCLUDED in your config and therefore all states are sent to InfluxDB")
+			self.logger.debug("PrintDeviceToEventLog(): sending entire device to diff_to_json for device: " + dev.name)
+			newjson = self.adaptor.diff_to_json(dev, [], False)
+		else:
+			self.logger.debug("PrintDeviceToEventLog(): sending only included states to diff_to_json for device: " + dev.name)
+			newjson = self.adaptor.diff_to_json(dev, self.StatesIncludeList, False)
 
 		if newjson is None:
 			indigo.server.log("   the device: \"" + dev.name + "\" is not excluded from updates to InfluxDB, but it contains no states/properties that are capable of being sent to Influx/Grafana.")			
@@ -1416,7 +1472,7 @@ class Plugin(indigo.PluginBase):
 		else:
 			for kk, vv in newjson.iteritems():
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
-					if kk in self.StatesIncludeList and not excluded:
+					if (kk in self.StatesIncludeList or included) and not excluded:
 						status = " (INCLUDED)"
 					elif excluded:
 						status = " (EXCLUDED)"
@@ -1488,3 +1544,88 @@ class Plugin(indigo.PluginBase):
 		indigo.server.log("rebuilding the Grafana server (will not delete data).  This occurs when the plugin is updated or if you've asked to manually rebuild the Grafana server.  The Grafana server will restart once this is complete.")
 		self.triggerGrafanaRestart = True
 		self.CreateGrafanaConfig()
+
+	def ForceUpdate(self):
+		self.UpdateAll()
+
+	def FilterAction(self, valuesDict, typeId = 0, devId = 0):
+		if valuesDict["filterAction"] == "edit":
+			if len(valuesDict["listFilters"]) != 1:
+				self.logger.error("there must be one filter selected from the Filters List")
+				return valuesDict
+
+			try:
+				valuesDict["filterProperty"] = self.FilterList[int(valuesDict["listFilters"][0])][0]
+				valuesDict["filterPropertyMinValue"] = self.FilterList[int(valuesDict["listFilters"][0])][1]
+				valuesDict["filterPropertyMaxValue"] = self.FilterList[int(valuesDict["listFilters"][0])][2]
+				valuesDict["filterAllDevices"] = self.FilterList[int(valuesDict["listFilters"][0])][3]				
+				valuesDict["listDevices"] = self.FilterList[int(valuesDict["listFilters"][0])][4]
+				valuesDict["LogFailures"] = self.FilterList[int(valuesDict["listFilters"][0])][5]
+				valuesDict["editMode"] = True
+			except:
+				pass
+		elif valuesDict["filterAction"] == "delete":
+			for i in valuesDict["listFilters"]:
+				del self.FilterList[int(i)]
+
+			self.pluginPrefs["listFilterList"] = []
+
+		return valuesDict
+
+	def filterActionMenuChanged(self, valuesDict, typeId=0, devId=0):
+		if valuesDict["filterAction"] == "add":
+			valuesDict["editMode"] = True
+		else:
+			valuesDict["editMode"] = False
+
+		return valuesDict
+
+	def SaveFilterValues(self, valuesDict, typeId=0, devId=0):
+		try:
+			filterProperty = valuesDict["filterProperty"]
+			filterPropertyMinValue = float(valuesDict["filterPropertyMinValue"])
+			filterPropertyMaxValue = float(valuesDict["filterPropertyMaxValue"])
+			filterAllDevices = valuesDict["filterAllDevices"]
+			filterDevices = valuesDict["listDevices"]
+			enableLogging = valuesDict["LogFailures"]
+		except ValueError:
+			self.logger.error("filter max and min values must be numeric")
+			return valuesDict
+
+		if filterPropertyMinValue >= filterPropertyMaxValue:
+			self.logger.error("minimum value must be smaller than the maximum value.")
+			return valuesDict
+
+		if len(filterDevices) == 0 and not filterAllDevices:
+			self.logger.error("the filter must be applied to one or more devices.")
+			return valuesDict
+
+		if valuesDict["filterAction"] == "edit":
+			self.FilterList[int(valuesDict["listFilters"][0])][0] = filterProperty.strip()
+			self.FilterList[int(valuesDict["listFilters"][0])][1] = filterPropertyMinValue
+			self.FilterList[int(valuesDict["listFilters"][0])][2] = filterPropertyMaxValue
+			self.FilterList[int(valuesDict["listFilters"][0])][3] = filterAllDevices
+			self.FilterList[int(valuesDict["listFilters"][0])][4] = filterDevices
+			self.FilterList[int(valuesDict["listFilters"][0])][5] = enableLogging
+		elif valuesDict["filterAction"] == "add":
+			self.logger.debug("added the filter property for state " + filterProperty + " (" + str(filterPropertyMinValue) + ", " + str(filterPropertyMaxValue) + "), applies to: ")
+			if filterAllDevices:
+				self.logger.debug("   ALL devices")
+			else:
+				self.logger.debug(filterDevices)
+
+			self.FilterList.append([filterProperty.strip(), filterPropertyMinValue, filterPropertyMaxValue, filterAllDevices, filterDevices, enableLogging])
+
+		self.pluginPrefs["listFilterList"] = self.FilterList
+
+		valuesDict["filterProperty"] = ""
+		valuesDict["filterPropertyMinValue"] = ""
+		valuesDict["filterPropertyMaxValue"] = ""
+		valuesDict["filterAllDevices"] = True
+		valuesDict["listDevices"] = []
+		valuesDict["LogFailures"] = True
+		valuesDict["editMode"] = False
+
+		return valuesDict
+
+
