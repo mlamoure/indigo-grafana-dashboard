@@ -1586,8 +1586,12 @@ class Plugin(indigo.PluginBase):
 			filterPropertyMinValue = float(valuesDict["filterPropertyMinValue"])
 			filterPropertyMaxValue = float(valuesDict["filterPropertyMaxValue"])
 			filterAllDevices = valuesDict["filterAllDevices"]
-			filterDevices = valuesDict["listDevices"]
-			enableLogging = valuesDict["LogFailures"]
+			filterDevices = []
+	
+			if not filterAllDevices:
+				filterDevices = valuesDict["listDevices"]
+	
+			enableLogging = valuesDict["logFailures"]
 		except ValueError:
 			self.logger.error("filter max and min values must be numeric")
 			return valuesDict
@@ -1601,20 +1605,16 @@ class Plugin(indigo.PluginBase):
 			return valuesDict
 
 		if valuesDict["filterAction"] == "edit":
-			self.FilterList[int(valuesDict["listFilters"][0])][0] = filterProperty.strip()
-			self.FilterList[int(valuesDict["listFilters"][0])][1] = filterPropertyMinValue
-			self.FilterList[int(valuesDict["listFilters"][0])][2] = filterPropertyMaxValue
-			self.FilterList[int(valuesDict["listFilters"][0])][3] = filterAllDevices
-			self.FilterList[int(valuesDict["listFilters"][0])][4] = filterDevices
-			self.FilterList[int(valuesDict["listFilters"][0])][5] = enableLogging
-		elif valuesDict["filterAction"] == "add":
-			self.logger.debug("added the filter property for state " + filterProperty + " (" + str(filterPropertyMinValue) + ", " + str(filterPropertyMaxValue) + "), applies to: ")
-			if filterAllDevices:
-				self.logger.debug("   ALL devices")
-			else:
-				self.logger.debug(filterDevices)
+			del self.FilterList[int(valuesDict["listFilters"][0])]
 
-			self.FilterList.append([filterProperty.strip(), filterPropertyMinValue, filterPropertyMaxValue, filterAllDevices, filterDevices, enableLogging])
+		self.logger.debug("added the filter property for state " + filterProperty + " (" + str(filterPropertyMinValue) + ", " + str(filterPropertyMaxValue) + "), applies to: ")
+
+		if filterAllDevices:
+			self.logger.debug("   ALL devices")
+		else:
+			self.logger.debug(filterDevices)
+
+		self.FilterList.append([filterProperty.strip(), filterPropertyMinValue, filterPropertyMaxValue, filterAllDevices, filterDevices, enableLogging])
 
 		self.pluginPrefs["listFilterList"] = self.FilterList
 

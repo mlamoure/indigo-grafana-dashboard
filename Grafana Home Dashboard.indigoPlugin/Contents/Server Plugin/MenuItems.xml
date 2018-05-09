@@ -38,7 +38,7 @@
 		<Field id="simpleSeparator1" type="separator"/>
 
 		<Field type="menu" id="filterProperty" visibleBindingId="filterAction" visibleBindingValue="add" enabledBindingId="editMode">
-			<Label>Select state/property:</Label>
+			<Label>State/property:</Label>
 			<List class="self" method="AllStatesGenerator" dynamicReload="true" />
 		</Field>	
 
@@ -50,21 +50,25 @@
 			<Label>Maximum value:</Label>
 		</Field>
 
+		<Field id="filterAllDevicesInstruction" visibleBindingId="filterAction" visibleBindingValue="edit,add" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+			<Label>Note: Selecting "Applies to all devices" will make the device list selections irrelevant.</Label>
+		</Field>
+
 		<Field id="filterAllDevices" type="checkbox" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
 				<Label>Applies to all devices:</Label>
 				<Description>Enable</Description>
 		</Field>
 
-	<Field id="listDevicesInstruction" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>If selecting specific devices that this filter applies to, you may use the Command or Shift key to select multiple devices from this list.</Label>
-	</Field>
+		<Field id="listDevicesInstruction" visibleBindingId="filterAction" visibleBindingValue="edit,add" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+			<Label>If selecting specific devices that this filter applies to, you may use the Command or Shift key to select multiple devices from this list.</Label>
+		</Field>
 
-		<Field type="list" id="listDevices" rows="12" alwaysUseInDialogHeightCalc="true" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="filterAllDevices" enabledBindingNegate="true">
+		<Field type="list" id="listDevices" rows="12" alwaysUseInDialogHeightCalc="true" enabledBindingId="filterAllDevices" enabledBindingNegate="true" visibleBindingId="filterAction" visibleBindingValue="edit,add">
 			<Label>Devices this filter applies to:</Label>
 			<List class="indigo.devices" dynamicReload="true" />
 		</Field>
 
-		<Field id="LogFailures" type="checkbox" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
+		<Field id="logFailures" type="checkbox" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
 				<Label>Log failures to Indigo Event Log</Label>
 				<Description>Enable</Description>
 		</Field>
