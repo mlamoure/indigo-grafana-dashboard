@@ -7,9 +7,10 @@ Both InfluxDB and Grafana are included within the plugin, nothing is installed o
 # Features #
 * Built-in InfluxDB and Grafana servers
 * Latest Influx client libraries
-* Included filtering configuration, no dependencies on Global Property Manager
+* Granular control of inclusion and exclusion criteria to control which devices, and what states, are sent to InfluxDB and Grafana (dependency on Global Property Manager from previous versions is removed)
+* Filtering - advanced configuration allows the creation of filters to prevent values outside of ranges, or sudden changes, from being sent to Influx and messing up your pretty graphs.
 * Utility functions to output the JSON of any device, or to investigate which devices are publishing any particular property.  This takes the guessing work out of your Grafana queries.
-* Impoved error handling, logging over previous plugins working with Influx
+* Improved error handling, logging over previous plugins working with Influx
 
 # Documentation #
 [https://github.com/mlamoure/indigo-grafana-dashboard/wiki]
