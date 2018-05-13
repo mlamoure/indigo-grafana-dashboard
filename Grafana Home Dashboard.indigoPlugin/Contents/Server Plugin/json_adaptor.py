@@ -148,8 +148,8 @@ class JSONAdaptor():
 				except ValueError:
 					self.logger.debug('One of the columns just will not convert to the requested type. Partial record written.')
 					pass
-				except:
-					self.logger.error('Unknown problem.  Partial record written.')
+				except Exception as e:
+					self.logger.debug('Unknown problem.  Partial record written.  Error:' + str(e))
 					pass
 
 		return newjson

@@ -5,11 +5,21 @@
         <Name>Configure data filters (advanced)</Name>
 	<ConfigUI>
 		<Field id="FilterValuesInstruction" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-			<Label>You may create filters on a per property/state basis that apply to one, multiple, or all devices.  The filter only applies to numerical values.  Creating more than one filter for a property or device will require for the property/device combo to be within the approved range for all filters in order for it to pass on to InfluxDB.  If applying the filter fails because of a type error, the value is sent to InfluxDB.  This currently is only implemetned for devices.  Variables are not supported.
+			<Label>You may create filters on a per state basis that apply to one, multiple, or all devices.  The filter only applies to numerical values.  Creating more than one filter for a state or device will require for the state/device combo to pass ALL states in order to be sent to InfluxDB.  Once a state fails a filter, further filters are not processed.  Only device filters are supported, variable filters are not supported.
 			</Label>
 		</Field>
 
-		<Field type="menu" id="filterAction" defaultValue="add">
+		<Field id="FilterValuesInstruction2" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+			<Label>The "order" of filters only affects the logging to the Event log.  For example, you can have a filter rule that applies to a single device / state combo (for example, a common state such as SensorValue) that misbehaves regularly, and turn logging off.  Then a second rule can apply to all devices, on the same state (SensorValue), with logging on.  This way, you'll only see log messages for devices that are not expected to behave badly.
+			</Label>
+		</Field>
+
+		<Field id="lockActionChange" hidden="true" type="checkbox" defaultValue="false">
+				<Label></Label>
+				<Description></Description>
+		</Field>
+
+		<Field type="menu" id="filterAction" defaultValue="add" enabledBindingId="lockActionChange" enabledBindingNegate="true">
 			<Label>Action:</Label>
 			<List>
 				<Option value="add">Add new filter</Option>
@@ -24,7 +34,7 @@
 			<List class="self" method="IncludedFiltersListGenerator" dynamicReload="true" />
 		</Field>
 
-		<Field id="buttonEditFilter" visibleBindingId="filterAction" visibleBindingValue="edit,delete" type="button" tooltip="" alwaysUseInDialogHeightCalc="true">
+		<Field id="buttonEditFilter" visibleBindingId="filterAction" visibleBindingValue="edit,delete" type="button" tooltip="" alwaysUseInDialogHeightCalc="true" enabledBindingId="editMode" enabledBindingNegate="true">
 			<Label></Label>
 			<Title>perform action on selected filter(s)</Title>
 			<CallbackMethod>FilterAction</CallbackMethod>
@@ -37,33 +47,87 @@
 
 		<Field id="simpleSeparator1" type="separator"/>
 
-		<Field type="menu" id="filterProperty" visibleBindingId="filterAction" visibleBindingValue="add" enabledBindingId="editMode">
-			<Label>State/property:</Label>
-			<List class="self" method="AllStatesGenerator" dynamicReload="true" />
-		</Field>	
-
-		<Field id="filterPropertyMinValue" type="textfield" defaultValue="" visibleBindingId="filterAction" visibleBindingValue="edit,add" tooltip="minimum value" enabledBindingId="editMode">
-			<Label>Minimum value:</Label>
+		<Field type="menu" id="filterOrder" defaultValue="10" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
+			<Label>Insert at (order for processing filters):</Label>
+			<List>
+				<Option value="1">1</Option>
+				<Option value="2">2</Option>
+				<Option value="3">3</Option>
+				<Option value="4">4</Option>
+				<Option value="5">5</Option>
+				<Option value="6">6</Option>
+				<Option value="7">7</Option>
+				<Option value="8">8</Option>
+				<Option value="9">9</Option>
+				<Option value="10">10</Option>
+				<Option value="11">11</Option>
+				<Option value="12">12</Option>
+				<Option value="13">13</Option>
+				<Option value="14">14</Option>
+				<Option value="15">15</Option>
+				<Option value="16">16</Option>
+				<Option value="17">17</Option>
+				<Option value="18">18</Option>
+				<Option value="19">19</Option>
+				<Option value="20">20</Option>
+			</List>
 		</Field>
 
-		<Field id="filterPropertyMaxValue" type="textfield" defaultValue="" visibleBindingId="filterAction" visibleBindingValue="edit,add" tooltip="maximum value" enabledBindingId="editMode">
-			<Label>Maximum value:</Label>
+		<Field type="textfield" readonly="true" id="editFilterProperty" visibleBindingId="filterAction" visibleBindingValue="edit" enabledBindingId="editMode">
+			<Label>Editing State:</Label>
+		</Field>	
+
+		<Field type="menu" id="filterProperty" visibleBindingId="filterAction" visibleBindingValue="add" enabledBindingId="editMode">
+			<Label>State:</Label>
+			<List class="self" method="AllStatesGenerator" dynamicReload="true" />
+		</Field>
+
+		<Field id="percentVisible" hidden="true" type="checkbox" defaultValue="false">
+				<Label></Label>
+				<Description></Description>
 		</Field>
 
 		<Field id="filterAllDevicesInstruction" visibleBindingId="filterAction" visibleBindingValue="edit,add" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-			<Label>Note: Selecting "Applies to all devices" will make the device list selections irrelevant.</Label>
+			<Label>Minimum / maximum requires specific values (float) that the state must stay within in order to be passed to InfluxDB.  Maximum percentage changed is the maximum (up or down) that the value of the state can change in order to be passed to InfluxDB.</Label>
 		</Field>
 
-		<Field id="filterAllDevices" type="checkbox" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
+		<Field type="menu" id="filterStrategy" defaultValue="minMax" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode" dynamicReload="true">
+			<Label>Filter strategy:</Label>
+			<List>
+				<Option value="minMax">minimum / maximum value</Option>
+				<Option value="percentChanged">maximum percentage change</Option>
+			</List>
+			<CallbackMethod>filterStrategyChanged</CallbackMethod>			
+		</Field>
+
+		<Field id="filterPropertyPercent" type="textfield" defaultValue="" visibleBindingId="percentVisible" visibleBindingValue="true" tooltip="minimum value" enabledBindingId="editMode">
+			<Label>Maximum percentage change:</Label>
+		</Field>
+
+		<Field id="filterPropertyMinValue" type="textfield" defaultValue="" visibleBindingId="percentVisible" visibleBindingValue="false" tooltip="minimum value" enabledBindingId="editMode">
+			<Label>Minimum value:</Label>
+		</Field>
+
+		<Field id="filterPropertyMaxValue" type="textfield" defaultValue="" visibleBindingId="percentVisible" visibleBindingValue="false" tooltip="maximum value" enabledBindingId="editMode">
+			<Label>Maximum value:</Label>
+		</Field>
+
+		<Field id="filterAllDevices" type="checkbox" defaultValue="true" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
 				<Label>Applies to all devices:</Label>
 				<Description>Enable</Description>
+				<CallbackMethod>filterAllDevicesChanged</CallbackMethod>
 		</Field>
 
 		<Field id="listDevicesInstruction" visibleBindingId="filterAction" visibleBindingValue="edit,add" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 			<Label>If selecting specific devices that this filter applies to, you may use the Command or Shift key to select multiple devices from this list.</Label>
 		</Field>
 
-		<Field type="list" id="listDevices" rows="12" alwaysUseInDialogHeightCalc="true" enabledBindingId="filterAllDevices" enabledBindingNegate="true" visibleBindingId="filterAction" visibleBindingValue="edit,add">
+		<Field id="deviceListVisible" hidden="true" type="checkbox" defaultValue="false">
+				<Label></Label>
+				<Description></Description>
+		</Field>
+
+		<Field type="list" id="listDevices" rows="12" alwaysUseInDialogHeightCalc="true" visibleBindingId="deviceListVisible" visibleBindingValue="true">
 			<Label>Devices this filter applies to:</Label>
 			<List class="indigo.devices" dynamicReload="true" />
 		</Field>

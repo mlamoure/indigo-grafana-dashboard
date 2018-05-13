@@ -31,6 +31,23 @@ DEFAULT_UPDATE_FREQUENCY = 24 # frequency of update check, in hours
 
 DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
+class InfluxFilter(object):
+	def __init__(self, state, filterStrategy, minValue, maxValue, maxPercent, allDevices, appliedDevices, log):
+		self.state = state
+		self.filterStrategy = filterStrategy
+		self.minValue = float(minValue)
+		self.maxValue = float(maxValue)
+		self.maxPercent = float(maxPercent)
+		self.allDevices = allDevices
+		self.appliedDevices = map(int, appliedDevices)
+		self.log = log
+
+		if self.allDevices:
+			self.appliesToString = "all devices"
+		else:
+			self.appliesToString = "specific devices"
+
+
 class Plugin(indigo.PluginBase):
 	def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
 		super(Plugin, self).__init__(pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
@@ -116,7 +133,18 @@ class Plugin(indigo.PluginBase):
 			self.StatesIncludeList = self.pluginPrefs.get("listIncStates", [])
 			self.DeviceIncludeList = self.pluginPrefs.get("listIncDevices", [])
 			self.DeviceExcludeList = self.pluginPrefs.get("listExclDevices", [])
-			self.FilterList = self.pluginPrefs.get("listFilterList", [])
+			
+			preferencesFilterList = self.pluginPrefs.get("listFilterList", [])
+			self.FilterList = []
+
+			try:
+				# filter list cleanup, conversion to object
+				for item in preferencesFilterList:
+					newFilter = InfluxFilter(item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7])
+					self.FilterList.append(newFilter)
+			except:
+				self.logger.error("there was an error loading/upgrading your filters.  Please check the filters configuration to correct.")
+				pass
 
 			# sets the default include states when the plugin has never been configured.
 			if len(self.StatesIncludeList) == 0:
@@ -410,7 +438,7 @@ class Plugin(indigo.PluginBase):
 				self.BuildConfigurationLists()
 
 			if needsUpdating:
-				self.DeviceToInflux(dev, False)
+				self.DeviceToInflux(None, dev, False)
 			elif self.TransportDebugL2 and not needsUpdating:
 				self.logger.debug("    no update needed for device: " + dev.name)
 
@@ -452,7 +480,7 @@ class Plugin(indigo.PluginBase):
 				self.logger.debug("   device was excluded from InfluxDB update: " + newDev.name)
 			return
 
-		device_was_updated = self.DeviceToInflux(newDev)
+		device_was_updated = self.DeviceToInflux(origDev, newDev, True)
 
 		if not device_was_updated:
 			if self.JSONDebug:
@@ -949,7 +977,7 @@ class Plugin(indigo.PluginBase):
 			indigo.server.log("config file for InfluxDB has been updated; server will restart shortly.")
 
 
-	def DeviceToInflux(self, dev, updateCheck = True):
+	def DeviceToInflux(self, origDev, dev, updateCheck = True):
 		# custom add to influx work
 		# tag by folder if present
 		tagnames = u'name folderId'.split()
@@ -969,29 +997,62 @@ class Plugin(indigo.PluginBase):
 		if newjson is None:
 			return False
 
-		filterjson = copy.deepcopy(newjson)
-
 		# Advanced filtering: Check if the values are within min and max range that was set
-		for kk, vv in filterjson.iteritems():
-			for state, minPropertyValue, maxPropertyValue, filterAllDevices, deviceList, log in self.FilterList:
-				if (dev.id in deviceList or filterAllDevices) and kk == state:
+		if len(self.FilterList) > 0:
+			filterjson = copy.deepcopy(newjson)
+			for kk, vv in filterjson.iteritems():
+				for influxFilterRecord in self.FilterList:
+					passedFilter = True
 					try:
-						if float(minPropertyValue) <= float(vv) <= float(maxPropertyValue):
-							if self.TransportDebug:
-								self.logger.debug("a value (" + str(vv) + ") for device " + dev.name + " was WITHIN the specified range (" + str(minPropertyValue) + ", " + str(maxPropertyValue) + ") and will not be sent to InfluxDB")
-						else:
-							if log:
-								self.logger.info("a value (" + str(vv) + ") for device " + dev.name + " was not in the configured range (" + str(minPropertyValue) + ", " + str(maxPropertyValue) + ") and will not be sent to InfluxDB")
+						if (dev.id in influxFilterRecord.appliedDevices or influxFilterRecord.allDevices) and kk == influxFilterRecord.state:
+							self.logger.debug(dev.name + "[" + kk + "]: looking at filter: " + influxFilterRecord.state + " for " + influxFilterRecord.appliesToString + " with a range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ")")
+							if influxFilterRecord.filterStrategy == "minMax" and (influxFilterRecord.minValue <= float(vv) <= influxFilterRecord.maxValue):
+								if self.TransportDebug:
+									self.logger.debug("    passed filter: a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device " + dev.name + "' was WITHIN the specified range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will be sent to InfluxDB")
+							elif origDev is not None and influxFilterRecord.filterStrategy == "percentChanged":
+								try:
+									origValue = origDev.states[kk]
+									percentValueChanged = ((origValue - vv) / origValue) * 100
 
-							del newjson[kk]
+									if abs(percentValueChanged) > influxFilterRecord.maxPercent:
+										passedFilter = False
+									else:
+										self.logger.debug("    passed filter: a value (old value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' DID NOT exceeded percent changed (actual change: " + str(abs(percentValueChanged)) + ", threshhold: " + str(influxFilterRecord.maxPercent) + ") and will be sent to InfluxDB")									
 
-					except:
-						self.logger.debug("there was a error while trying to filter based on the range")
+								except Exception as e:
+									passedFilter = True
+									self.logger.debug("    error while trying to compute the percentage changed.  Error: " + str(e))
+							elif origDev is None and influxFilterRecord.filterStrategy == "percentChanged":
+								self.logger.debug("    original device was not provided to compare, no ability to calcualte percentage changed")
+							else:
+								passedFilter = False
+
+					except Exception as e:
+						passedFilter = True
+						self.logger.error("there was a error while trying to process filters, please check the debug logs or recreate your filters")
 						self.logger.debug("   Key: " + str(kk))
 						self.logger.debug("   Value: " + str(vv))
 						self.logger.debug("   Device: " + str(dev.name))
-						self.logger.debug("   Min: " + str(minPropertyValue))
-						self.logger.debug("   Max: " + str(maxPropertyValue))
+						self.logger.debug("   Min: " + str(influxFilterRecord.minValue))
+						self.logger.debug("   Max: " + str(influxFilterRecord.maxValue))
+						self.logger.debug("   Error: " + str(e))
+
+					if not passedFilter:
+						if influxFilterRecord.log:
+							if influxFilterRecord.filterStrategy == "minMax":
+								self.logger.info("a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' was not in the configured range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will not be sent to InfluxDB")
+							else:
+								self.logger.info("a value (old value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' exceeded percent changed (percent changed: " + str(abs(percentValueChanged)) + "%, threshhold: " + str(influxFilterRecord.maxPercent) + "%) and will not be sent to InfluxDB")									
+						else:
+							if influxFilterRecord.filterStrategy == "minMax":
+								self.logger.debug("    silent failed filter: a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' was not in the configured range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will not be sent to InfluxDB")
+							else:
+								self.logger.debug("    silent failed filter: a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' exceeded percent changed (" + str(influxFilterRecord.maxPercent) + ") and will not be sent to InfluxDB")
+
+						del newjson[kk]
+						break # stop processing filter rules.
+
+		### END Advanced Filtering
 
 		newtags = {}
 		for tag in tagnames:
@@ -1332,16 +1393,19 @@ class Plugin(indigo.PluginBase):
 
 	def IncludedFiltersListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
 		FilterListUI = []
+		for filterItem in self.FilterList:
 
-		for i in range(len(self.FilterList)):
-			if self.FilterList[i][3]:
+			if filterItem.allDevices:
 				appliesto = "(all devices)"
 			else:
 				appliesto = "(specific devices)"
 
-			values = "min: " + str(self.FilterList[i][1]) + ", max: " + str(self.FilterList[i][2])
+			if filterItem.filterStrategy == "minMax":
+				values = "min: " + str(filterItem.minValue) + ", max: " + str(filterItem.maxValue)
+			else:
+				values = "percent: " + str(filterItem.maxPercent)
 
-			FilterListUI.append((i, self.FilterList[i][0] + " " + appliesto + " " + values))
+			FilterListUI.append((len(FilterListUI), str(len(FilterListUI) + 1) + ": " + filterItem.state + " " + appliesto + " " + values))
 
 		return FilterListUI
 
@@ -1555,20 +1619,40 @@ class Plugin(indigo.PluginBase):
 				return valuesDict
 
 			try:
-				valuesDict["filterProperty"] = self.FilterList[int(valuesDict["listFilters"][0])][0]
-				valuesDict["filterPropertyMinValue"] = self.FilterList[int(valuesDict["listFilters"][0])][1]
-				valuesDict["filterPropertyMaxValue"] = self.FilterList[int(valuesDict["listFilters"][0])][2]
-				valuesDict["filterAllDevices"] = self.FilterList[int(valuesDict["listFilters"][0])][3]				
-				valuesDict["listDevices"] = self.FilterList[int(valuesDict["listFilters"][0])][4]
-				valuesDict["LogFailures"] = self.FilterList[int(valuesDict["listFilters"][0])][5]
+				editItem = self.FilterList[int(valuesDict["listFilters"][0])]
+				valuesDict["filterProperty"] = editItem.state
+				valuesDict["editFilterProperty"] = editItem.state
+				valuesDict["filterOrder"] = int(valuesDict["listFilters"][0]) + 1
+				
+				valuesDict["filterStrategy"] = editItem.filterStrategy
+				valuesDict["filterPropertyMinValue"] = editItem.minValue
+				valuesDict["filterPropertyMaxValue"] = editItem.maxValue
+				valuesDict["filterPropertyPercent"] = editItem.maxPercent
+
+				valuesDict["filterAllDevices"] = editItem.allDevices				
+				valuesDict["listDevices"] = editItem.appliedDevices
+				valuesDict["logFailures"] = editItem.log
+
 				valuesDict["editMode"] = True
-			except:
+				valuesDict["lockActionChange"] = True
+				valuesDict["percentVisible"] = editItem.filterStrategy == "percentChanged"
+				valuesDict["deviceListVisible"] = not editItem.allDevices
+
+			except Exception as e:
+				self.logger.debug("error editing the filter: " + str(e))
 				pass
+
 		elif valuesDict["filterAction"] == "delete":
+			listToDelete = []
 			for i in valuesDict["listFilters"]:
+				listToDelete.append(i)
+
+			listToDelete.sort(reverse=True)
+	
+			for i in listToDelete:
 				del self.FilterList[int(i)]
 
-			self.pluginPrefs["listFilterList"] = []
+			self.SaveFiltersToPreferences()
 
 		return valuesDict
 
@@ -1579,24 +1663,64 @@ class Plugin(indigo.PluginBase):
 			valuesDict["editMode"] = False
 
 		return valuesDict
+	
+	def filterStrategyChanged(self, valuesDict, typeId=0, devId=0):
+		valuesDict["percentVisible"] = valuesDict["filterStrategy"] == "percentChanged" and (valuesDict["filterAction"] == "edit" or valuesDict["filterAction"] == "add")
+
+		return valuesDict
+
+	def filterAllDevicesChanged(self, valuesDict, typeId=0, devId=0):
+		valuesDict["deviceListVisible"] = not valuesDict["filterAllDevices"]  and (valuesDict["filterAction"] == "edit" or valuesDict["filterAction"] == "add")
+
+		return valuesDict
+
+	def SaveFiltersToPreferences(self):
+		toSave = []
+
+		for influxFilterRecord in self.FilterList:
+			toSave.append([influxFilterRecord.state, influxFilterRecord.filterStrategy, influxFilterRecord.minValue, influxFilterRecord.maxValue, influxFilterRecord.maxPercent, influxFilterRecord.allDevices, influxFilterRecord.appliedDevices, influxFilterRecord.log])
+
+		self.pluginPrefs["listFilterList"] = toSave
 
 	def SaveFilterValues(self, valuesDict, typeId=0, devId=0):
+		if valuesDict["filterProperty"] is None:
+			self.logger.error("Select a valid property/state")
+			return valuesDict
+
+		if valuesDict["filterOrder"] is None:
+			self.logger.error("Select an 'insert at' value")
+			return valuesDict
+
 		try:
+			filterOrder = int(valuesDict["filterOrder"])
 			filterProperty = valuesDict["filterProperty"]
-			filterPropertyMinValue = float(valuesDict["filterPropertyMinValue"])
-			filterPropertyMaxValue = float(valuesDict["filterPropertyMaxValue"])
+
+			filterStrategy = valuesDict["filterStrategy"]
+			filterPropertyMinValue = 0
+			filterPropertyMaxValue = 0
+			filterPropertyPercent = 0
+
+			if filterStrategy == "minMax":
+				filterPropertyMinValue = float(valuesDict["filterPropertyMinValue"])
+				filterPropertyMaxValue = float(valuesDict["filterPropertyMaxValue"])
+			else:
+				filterPropertyPercent = float(valuesDict["filterPropertyPercent"])
+
 			filterAllDevices = valuesDict["filterAllDevices"]
 			filterDevices = []
 	
 			if not filterAllDevices:
 				filterDevices = valuesDict["listDevices"]
 	
-			enableLogging = valuesDict["logFailures"]
+			log = valuesDict["logFailures"]
 		except ValueError:
-			self.logger.error("filter max and min values must be numeric")
+			self.logger.error("Ensure that filter max and min values must be numeric")
+			return valuesDict
+		except:
+			self.logger.error("Error validating the form.  Ensure that filter max and min values must be numeric, and all fields are filled in.")
 			return valuesDict
 
-		if filterPropertyMinValue >= filterPropertyMaxValue:
+		if filterStrategy == "minMax" and filterPropertyMinValue >= filterPropertyMaxValue:
 			self.logger.error("minimum value must be smaller than the maximum value.")
 			return valuesDict
 
@@ -1604,7 +1728,11 @@ class Plugin(indigo.PluginBase):
 			self.logger.error("the filter must be applied to one or more devices.")
 			return valuesDict
 
+		if filterOrder > len(self.FilterList):
+			filterOrder = len(self.FilterList)
+
 		if valuesDict["filterAction"] == "edit":
+			self.logger.debug("deleting index " + valuesDict["listFilters"][0])
 			del self.FilterList[int(valuesDict["listFilters"][0])]
 
 		self.logger.debug("added the filter property for state " + filterProperty + " (" + str(filterPropertyMinValue) + ", " + str(filterPropertyMaxValue) + "), applies to: ")
@@ -1614,18 +1742,29 @@ class Plugin(indigo.PluginBase):
 		else:
 			self.logger.debug(filterDevices)
 
-		self.FilterList.append([filterProperty.strip(), filterPropertyMinValue, filterPropertyMaxValue, filterAllDevices, filterDevices, enableLogging])
+		newFilter = InfluxFilter(filterProperty.strip(), filterStrategy, filterPropertyMinValue, filterPropertyMaxValue, filterPropertyPercent, filterAllDevices, filterDevices, log)
 
-		self.pluginPrefs["listFilterList"] = self.FilterList
+		# this is a short term fix to resolve the "Error: 'List' object has no attribute 'insert'" error
+		try:
+			self.FilterList.insert(filterOrder - 1, newFilter)
+		except Exception as e:
+			self.logger.error("error while trying to insert into filters list, appending to the end of the list instead.  Order of filters may be incorrect.")
+			self.logger.debug(" Error: " + str(e))
+			self.FilterList.append(newFilter)
 
+		self.SaveFiltersToPreferences()
+
+		valuesDict["filterOrder"] = ""
 		valuesDict["filterProperty"] = ""
+		valuesDict["filterStrategy"] = "minMax"
 		valuesDict["filterPropertyMinValue"] = ""
 		valuesDict["filterPropertyMaxValue"] = ""
+		valuesDict["filterPropertyPercent"] = ""
 		valuesDict["filterAllDevices"] = True
 		valuesDict["listDevices"] = []
-		valuesDict["LogFailures"] = True
-		valuesDict["editMode"] = False
+		valuesDict["logFailures"] = True
+		valuesDict["lockActionChange"] = False
+
+		valuesDict["editMode"] = valuesDict["filterAction"] == "add"
 
 		return valuesDict
-
-
