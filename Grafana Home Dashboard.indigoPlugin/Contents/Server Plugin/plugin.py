@@ -32,7 +32,7 @@ DEFAULT_UPDATE_FREQUENCY = 24 # frequency of update check, in hours
 DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
 class InfluxFilter(object):
-	def __init__(self, state, filterStrategy, minValue, maxValue, maxPercent, allDevices, appliedDevices, log):
+	def __init__(self, state, filterStrategy, minValue, maxValue, maxPercent, allDevices, appliedDevices, lockMinimumUpdates, log):
 		self.state = state
 		self.filterStrategy = filterStrategy
 		self.minValue = float(minValue)
@@ -40,12 +40,27 @@ class InfluxFilter(object):
 		self.maxPercent = float(maxPercent)
 		self.allDevices = allDevices
 		self.appliedDevices = map(int, appliedDevices)
+		self.lockMinimumUpdates = lockMinimumUpdates
 		self.log = log
 
 		if self.allDevices:
 			self.appliesToString = "all devices"
 		else:
 			self.appliesToString = "specific devices"
+
+
+		if self.allDevices:
+			appliesto = "(all devices)"
+		else:
+			appliesto = "(specific devices)"
+
+		if self.filterStrategy == "minMax":
+			values = "min: " + str(self.minValue) + ", max: " + str(self.maxValue)
+		else:
+			values = "percent: " + str(self.maxPercent)
+
+		self.name = self.state + " " + appliesto + " " + values
+
 
 
 class Plugin(indigo.PluginBase):
@@ -135,13 +150,29 @@ class Plugin(indigo.PluginBase):
 			self.DeviceExcludeList = self.pluginPrefs.get("listExclDevices", [])
 			
 			preferencesFilterList = self.pluginPrefs.get("listFilterList", [])
+			preferencesFilterVersion = self.pluginPrefs.get("preferencesFilterVersion", "1.0.0")
+
 			self.FilterList = []
 
 			try:
-				# filter list cleanup, conversion to object
-				for item in preferencesFilterList:
-					newFilter = InfluxFilter(item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7])
-					self.FilterList.append(newFilter)
+				if preferencesFilterVersion == "2.0.0":
+					for item in preferencesFilterList:
+						newFilter = InfluxFilter(item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8])
+						try:
+							newFilter.name = item[9]
+						except:
+							pass
+
+						self.FilterList.append(newFilter)
+
+				elif preferencesFilterVersion == "1.0.0":
+					indigo.server.log("upgrading data filters")
+					for item in preferencesFilterList:
+						newFilter = InfluxFilter(item[0], item[1], item[2], item[3], item[4], item[5], item[6], True, item[7])
+						self.FilterList.append(newFilter)
+		
+					self.SaveFiltersToPreferences()
+
 			except:
 				self.logger.error("there was an error loading/upgrading your filters.  Please check the filters configuration to correct.")
 				pass
@@ -420,18 +451,22 @@ class Plugin(indigo.PluginBase):
 			for devSearch in self.DeviceLastUpdatedList:
 				if devSearch[0] == dev.id:
 					found = True
+					locked = devSearch[2]
 
-					if devSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now():
+					if devSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now() and not locked:
 						if self.TransportDebug:
 							self.logger.debug("    minimum update period for device expired: " + dev.name + ", prior update timestamp: " + str(devSearch[1]))
 
 						needsUpdating = True
 						devSearch[1] = datetime.datetime.now()
+					elif locked:
+						if self.TransportDebug:
+							self.logger.debug("    device " + dev.name + " was locked from being updated as it failed a device filter.")						
 
 					break  # STOP THE search through the update list
 
 			if not found:
-				self.DeviceLastUpdatedList.append([dev.id, dev.lastChanged])
+				self.DeviceLastUpdatedList.append([dev.id, dev.lastChanged, False])
 
 			if datetime.datetime.now() + datetime.timedelta(minutes=UPDATE_STATES_LIST) < self.LastConfigRefresh:
 				self.logger.debug("    updating the states cache as it has gone stale")
@@ -493,13 +528,19 @@ class Plugin(indigo.PluginBase):
 		found = False
 		for devSearch in self.DeviceLastUpdatedList:
 			if devSearch[0] == origDev.name:
+				locked = devSearch[2]
 				found = True
 
 				devSearch[1] = datetime.datetime.now()
+
+				# unlock if locked since we rec'd an update
+				if locked:
+					devSearch[2] = False
+
 				break
 
 		if not found:
-			self.DeviceLastUpdatedList.append([origDev.name, datetime.datetime.now()])
+			self.DeviceLastUpdatedList.append([origDev.name, datetime.datetime.now(), False])
 
 		if self.TransportDebug:
 			self.logger.debug("completed deviceUpdated() for " + origDev.name)
@@ -1016,6 +1057,23 @@ class Plugin(indigo.PluginBase):
 
 									if abs(percentValueChanged) > influxFilterRecord.maxPercent:
 										passedFilter = False
+
+										# if the lock minimum updates is true, we need to mark the device as locked
+										if influxFilterRecord.lockMinimumUpdates:
+											found = False
+											for devSearch in self.DeviceLastUpdatedList:
+												if devSearch[0] == dev.id:
+													devSearch[2] = True
+													found = True
+													break
+
+											if not found:
+												self.DeviceLastUpdatedList.append([dev.id, datetime.datetime.now(), True])
+												found = True
+
+											if found and self.TransportDebug:
+												self.logger.debug("    locked device " + dev.name + " from InfluxDB updates until a device change occurs.")
+
 									else:
 										self.logger.debug("    passed filter: a value (old value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' DID NOT exceeded percent changed (actual change: " + str(abs(percentValueChanged)) + ", threshhold: " + str(influxFilterRecord.maxPercent) + ") and will be sent to InfluxDB")									
 
@@ -1394,18 +1452,7 @@ class Plugin(indigo.PluginBase):
 	def IncludedFiltersListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
 		FilterListUI = []
 		for filterItem in self.FilterList:
-
-			if filterItem.allDevices:
-				appliesto = "(all devices)"
-			else:
-				appliesto = "(specific devices)"
-
-			if filterItem.filterStrategy == "minMax":
-				values = "min: " + str(filterItem.minValue) + ", max: " + str(filterItem.maxValue)
-			else:
-				values = "percent: " + str(filterItem.maxPercent)
-
-			FilterListUI.append((len(FilterListUI), str(len(FilterListUI) + 1) + ": " + filterItem.state + " " + appliesto + " " + values))
+			FilterListUI.append((len(FilterListUI), str(len(FilterListUI) + 1) + ": " + filterItem.name))
 
 		return FilterListUI
 
@@ -1609,6 +1656,11 @@ class Plugin(indigo.PluginBase):
 		self.triggerGrafanaRestart = True
 		self.CreateGrafanaConfig()
 
+	def resetDataFilters(self):
+		indigo.server.log("resetting data filters")
+		self.FilterList = []
+		self.SaveFiltersToPreferences()
+
 	def ForceUpdate(self):
 		self.UpdateAll()
 
@@ -1620,6 +1672,7 @@ class Plugin(indigo.PluginBase):
 
 			try:
 				editItem = self.FilterList[int(valuesDict["listFilters"][0])]
+				valuesDict["filterName"] = editItem.name
 				valuesDict["filterProperty"] = editItem.state
 				valuesDict["editFilterProperty"] = editItem.state
 				valuesDict["filterOrder"] = int(valuesDict["listFilters"][0]) + 1
@@ -1628,6 +1681,7 @@ class Plugin(indigo.PluginBase):
 				valuesDict["filterPropertyMinValue"] = editItem.minValue
 				valuesDict["filterPropertyMaxValue"] = editItem.maxValue
 				valuesDict["filterPropertyPercent"] = editItem.maxPercent
+				valuesDict["preventMinimumUpdates"] = editItem.lockMinimumUpdates
 
 				valuesDict["filterAllDevices"] = editItem.allDevices				
 				valuesDict["listDevices"] = editItem.appliedDevices
@@ -1636,6 +1690,7 @@ class Plugin(indigo.PluginBase):
 				valuesDict["editMode"] = True
 				valuesDict["lockActionChange"] = True
 				valuesDict["percentVisible"] = editItem.filterStrategy == "percentChanged"
+				valuesDict["preventMinimumUpdates"] = editItem.filterStrategy == "percentChanged"
 				valuesDict["deviceListVisible"] = not editItem.allDevices
 
 			except Exception as e:
@@ -1666,6 +1721,7 @@ class Plugin(indigo.PluginBase):
 	
 	def filterStrategyChanged(self, valuesDict, typeId=0, devId=0):
 		valuesDict["percentVisible"] = valuesDict["filterStrategy"] == "percentChanged" and (valuesDict["filterAction"] == "edit" or valuesDict["filterAction"] == "add")
+		valuesDict["preventMinimumUpdates"] = valuesDict["filterStrategy"] == "percentChanged" and (valuesDict["filterAction"] == "edit" or valuesDict["filterAction"] == "add")
 
 		return valuesDict
 
@@ -1678,9 +1734,10 @@ class Plugin(indigo.PluginBase):
 		toSave = []
 
 		for influxFilterRecord in self.FilterList:
-			toSave.append([influxFilterRecord.state, influxFilterRecord.filterStrategy, influxFilterRecord.minValue, influxFilterRecord.maxValue, influxFilterRecord.maxPercent, influxFilterRecord.allDevices, influxFilterRecord.appliedDevices, influxFilterRecord.log])
+			toSave.append([influxFilterRecord.state, influxFilterRecord.filterStrategy, influxFilterRecord.minValue, influxFilterRecord.maxValue, influxFilterRecord.maxPercent, influxFilterRecord.allDevices, influxFilterRecord.appliedDevices, influxFilterRecord.lockMinimumUpdates, influxFilterRecord.log, influxFilterRecord.name])
 
 		self.pluginPrefs["listFilterList"] = toSave
+		self.pluginPrefs["preferencesFilterVersion"] = "2.0.0"
 
 	def SaveFilterValues(self, valuesDict, typeId=0, devId=0):
 		if valuesDict["filterProperty"] is None:
@@ -1692,6 +1749,7 @@ class Plugin(indigo.PluginBase):
 			return valuesDict
 
 		try:
+			filterName = valuesDict["filterName"]
 			filterOrder = int(valuesDict["filterOrder"])
 			filterProperty = valuesDict["filterProperty"]
 
@@ -1699,12 +1757,14 @@ class Plugin(indigo.PluginBase):
 			filterPropertyMinValue = 0
 			filterPropertyMaxValue = 0
 			filterPropertyPercent = 0
+			lockMinimumUpdates = True
 
 			if filterStrategy == "minMax":
 				filterPropertyMinValue = float(valuesDict["filterPropertyMinValue"])
 				filterPropertyMaxValue = float(valuesDict["filterPropertyMaxValue"])
 			else:
 				filterPropertyPercent = float(valuesDict["filterPropertyPercent"])
+				lockMinimumUpdates = valuesDict["preventMinimumUpdates"]
 
 			filterAllDevices = valuesDict["filterAllDevices"]
 			filterDevices = []
@@ -1742,9 +1802,11 @@ class Plugin(indigo.PluginBase):
 		else:
 			self.logger.debug(filterDevices)
 
-		newFilter = InfluxFilter(filterProperty.strip(), filterStrategy, filterPropertyMinValue, filterPropertyMaxValue, filterPropertyPercent, filterAllDevices, filterDevices, log)
+		newFilter = InfluxFilter(filterProperty.strip(), filterStrategy, filterPropertyMinValue, filterPropertyMaxValue, filterPropertyPercent, filterAllDevices, filterDevices, lockMinimumUpdates, log)
 
-		# this is a short term fix to resolve the "Error: 'List' object has no attribute 'insert'" error
+		if len(filterName) > 0:
+			newFilter.name = filterName
+
 		try:
 			self.FilterList.insert(filterOrder - 1, newFilter)
 		except Exception as e:
@@ -1754,12 +1816,14 @@ class Plugin(indigo.PluginBase):
 
 		self.SaveFiltersToPreferences()
 
+		valuesDict["filterName"] = ""
 		valuesDict["filterOrder"] = ""
 		valuesDict["filterProperty"] = ""
 		valuesDict["filterStrategy"] = "minMax"
 		valuesDict["filterPropertyMinValue"] = ""
 		valuesDict["filterPropertyMaxValue"] = ""
 		valuesDict["filterPropertyPercent"] = ""
+		valuesDict["preventMinimumUpdates"] = True
 		valuesDict["filterAllDevices"] = True
 		valuesDict["listDevices"] = []
 		valuesDict["logFailures"] = True

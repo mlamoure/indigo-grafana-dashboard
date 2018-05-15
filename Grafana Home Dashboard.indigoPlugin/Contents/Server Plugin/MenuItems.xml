@@ -77,6 +77,10 @@
 			<Label>Editing State:</Label>
 		</Field>	
 
+		<Field id="filterName" type="textfield" defaultValue="" visibleBindingId="filterAction" visibleBindingValue="edit" enabledBindingId="editMode" tooltip="minimum value">
+			<Label>Filter name:</Label>
+		</Field>
+
 		<Field type="menu" id="filterProperty" visibleBindingId="filterAction" visibleBindingValue="add" enabledBindingId="editMode">
 			<Label>State:</Label>
 			<List class="self" method="AllStatesGenerator" dynamicReload="true" />
@@ -130,6 +134,15 @@
 		<Field type="list" id="listDevices" rows="12" alwaysUseInDialogHeightCalc="true" visibleBindingId="deviceListVisible" visibleBindingValue="true">
 			<Label>Devices this filter applies to:</Label>
 			<List class="indigo.devices" dynamicReload="true" />
+		</Field>
+
+		<Field id="preventMinimumUpdatesInstruction" visibleBindingId="percentVisible" visibleBindingValue="true" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+			<Label>Locking minimum frequency updates will pause sending the minimum update frequency updates for a device that fails the filter, and wait for the next update to happen from the device before unlocking.  Note that this will lock all states for the device that failed a filter, not just for the state that was filtered.</Label>
+		</Field>
+
+		<Field id="preventMinimumUpdates" type="checkbox" defaultValue="true" visibleBindingId="percentVisible" visibleBindingValue="true" enabledBindingId="editMode">
+				<Label>lock minimum frequency updates after filter failure (recommended):</Label>
+				<Description>Enable</Description>
 		</Field>
 
 		<Field id="logFailures" type="checkbox" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
@@ -190,6 +203,10 @@
     <MenuItem id="rebuildGrafana">
         <Name>Rebuild and restart Grafana Server (will not delete data)</Name>
         <CallbackMethod>rebuildGrafana</CallbackMethod>
+    </MenuItem>
+    <MenuItem id="resetDataFilters">
+        <Name>Reset data filters</Name>
+        <CallbackMethod>resetDataFilters</CallbackMethod>
     </MenuItem>
 
     <MenuItem id="forceUpdate">
