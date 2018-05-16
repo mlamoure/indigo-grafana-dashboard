@@ -145,6 +145,10 @@
 				<Description>Enable</Description>
 		</Field>
 
+		<Field id="logFailuresInstruction" visibleBindingId="filterAction" visibleBindingValue="edit,add" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+			<Label>This option will log to the Event Log for Indigo.  Note that all filter failures will be logged silently to a log file, which can be viewed using the plugin menu.</Label>
+		</Field>
+
 		<Field id="logFailures" type="checkbox" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
 				<Label>Log failures to Indigo Event Log</Label>
 				<Description>Enable</Description>
@@ -157,6 +161,11 @@
 		</Field>
 
 	</ConfigUI>
+    </MenuItem>
+
+    <MenuItem id="FilterBlocksEventLog">
+        <Name>Print filter blocks to Event Log</Name>
+        <CallbackMethod>printFilterBlocksEventLog</CallbackMethod>
     </MenuItem>
 
     <MenuItem id="sep_server_repair"/>

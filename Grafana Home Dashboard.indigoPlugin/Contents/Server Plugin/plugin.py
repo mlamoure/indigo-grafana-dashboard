@@ -28,6 +28,7 @@ FAST_POLLING_INTERVAL = 5
 DEFAULT_POLLING_INTERVAL = 60  # number of seconds between each poll
 UPDATE_STATES_LIST = 15 # how frequently (in minutes) to update the state list
 DEFAULT_UPDATE_FREQUENCY = 24 # frequency of update check, in hours
+MAX_LOG_FILE_OUTPUT_LINES = 50
 
 DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
@@ -112,6 +113,7 @@ class Plugin(indigo.PluginBase):
 		self.GrafanaServerStatus = "stopped"
 		self.influxConfigFileLoc = os.getcwd() + '/servers/influxdb/influxdb.conf'
 		self.GrafanaConfigFileLoc = os.getcwd() + '/servers/grafana/conf/indigo.ini'
+		self.FilterLogFileLoc = os.getcwd() + '/filter.log'
 
 		self.LastConfigRefresh = datetime.datetime.now()
 		self.lastInfluxConfigCheck = datetime.datetime.now()
@@ -1038,7 +1040,7 @@ class Plugin(indigo.PluginBase):
 		if newjson is None:
 			return False
 
-		# Advanced filtering: Check if the values are within min and max range that was set
+		# Advanced data filtering processing section
 		if len(self.FilterList) > 0:
 			filterjson = copy.deepcopy(newjson)
 			for kk, vv in filterjson.iteritems():
@@ -1046,10 +1048,10 @@ class Plugin(indigo.PluginBase):
 					passedFilter = True
 					try:
 						if (dev.id in influxFilterRecord.appliedDevices or influxFilterRecord.allDevices) and kk == influxFilterRecord.state:
-							self.logger.debug(dev.name + "[" + kk + "]: looking at filter: " + influxFilterRecord.state + " for " + influxFilterRecord.appliesToString + " with a range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ")")
+							self.logger.debug(dev.name + "[" + kk + "]: looking at filter (" + influxFilterRecord.name + "): " + influxFilterRecord.state + " for " + influxFilterRecord.appliesToString + " with a range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ")")
 							if influxFilterRecord.filterStrategy == "minMax" and (influxFilterRecord.minValue <= float(vv) <= influxFilterRecord.maxValue):
 								if self.TransportDebug:
-									self.logger.debug("    passed filter: a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device " + dev.name + "' was WITHIN the specified range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will be sent to InfluxDB")
+									self.logger.debug("    Filter passed (" + influxFilterRecord.name + "): a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device " + dev.name + "' was WITHIN the specified range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will be sent to InfluxDB")
 							elif origDev is not None and influxFilterRecord.filterStrategy == "percentChanged":
 								try:
 									origValue = origDev.states[kk]
@@ -1067,7 +1069,7 @@ class Plugin(indigo.PluginBase):
 													found = True
 													break
 
-											if not found:
+											if not found:  # if we couldn't find it in the DeviceLastUpdated list, we add it, and lock it.
 												self.DeviceLastUpdatedList.append([dev.id, datetime.datetime.now(), True])
 												found = True
 
@@ -1075,14 +1077,15 @@ class Plugin(indigo.PluginBase):
 												self.logger.debug("    locked device " + dev.name + " from InfluxDB updates until a device change occurs.")
 
 									else:
-										self.logger.debug("    passed filter: a value (old value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' DID NOT exceeded percent changed (actual change: " + str(abs(percentValueChanged)) + ", threshhold: " + str(influxFilterRecord.maxPercent) + ") and will be sent to InfluxDB")									
+										if self.TransportDebug:
+											self.logger.debug("    Filter passed (" + influxFilterRecord.name + "): a value (old value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' DID NOT exceeded percent changed (actual change: " + str(abs(percentValueChanged)) + ", threshhold: " + str(influxFilterRecord.maxPercent) + ") and will be sent to InfluxDB")									
 
 								except Exception as e:
 									passedFilter = True
-									self.logger.debug("    error while trying to compute the percentage changed.  Error: " + str(e))
+									self.logger.debug("    error while trying to compute the percentage changed. Value will be sent on to InfluxDB.  Error: " + str(e))
 							elif origDev is None and influxFilterRecord.filterStrategy == "percentChanged":
 								self.logger.debug("    original device was not provided to compare, no ability to calcualte percentage changed")
-							else:
+							else: #minMax comes here if the values were not within range
 								passedFilter = False
 
 					except Exception as e:
@@ -1096,21 +1099,26 @@ class Plugin(indigo.PluginBase):
 						self.logger.debug("   Error: " + str(e))
 
 					if not passedFilter:
-						if influxFilterRecord.log:
-							if influxFilterRecord.filterStrategy == "minMax":
-								self.logger.info("a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' was not in the configured range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will not be sent to InfluxDB")
-							else:
-								self.logger.info("a value (old value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' exceeded percent changed (percent changed: " + str(abs(percentValueChanged)) + "%, threshhold: " + str(influxFilterRecord.maxPercent) + "%) and will not be sent to InfluxDB")									
+						if influxFilterRecord.filterStrategy == "minMax":
+							logLine = "Filter block (" + influxFilterRecord.name + "): a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' was not in the configured range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will not be sent to InfluxDB"
 						else:
-							if influxFilterRecord.filterStrategy == "minMax":
-								self.logger.debug("    silent failed filter: a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' was not in the configured range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will not be sent to InfluxDB")
-							else:
-								self.logger.debug("    silent failed filter: a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' exceeded percent changed (" + str(influxFilterRecord.maxPercent) + ") and will not be sent to InfluxDB")
+							logLine = "Filter block (" + influxFilterRecord.name + "): a value (previous value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' exceeded percent changed (percent changed: " + str(abs(percentValueChanged)) + "%, threshhold: " + str(influxFilterRecord.maxPercent) + "%) and will not be sent to InfluxDB"
+
+						try:
+							with open(self.FilterLogFileLoc, "a") as logFile:
+								logFile.write(datetime.datetime.now().strftime('%Y-%m-%d %H:%M') + ": " + logLine + '\n')
+						except Exception as e:
+							self.logger.error("error writing to filter log.  Error: " + str(e))
+
+						if influxFilterRecord.log:
+							self.logger.info(logLine)
+						else:
+							self.logger.debug(logLine)
 
 						del newjson[kk]
 						break # stop processing filter rules.
 
-		### END Advanced Filtering
+		### END Advanced data filtering section
 
 		newtags = {}
 		for tag in tagnames:
@@ -1663,6 +1671,43 @@ class Plugin(indigo.PluginBase):
 
 	def ForceUpdate(self):
 		self.UpdateAll()
+
+	def printFilterBlocksEventLog(self):
+		try:
+			indigo.server.log("Listing filter block log records (oldest to newest, maximum of " + str(MAX_LOG_FILE_OUTPUT_LINES) + " records):")
+			log_file = open(self.FilterLogFileLoc, "r")
+
+			for line in self.tail(log_file, MAX_LOG_FILE_OUTPUT_LINES)[0]:
+				indigo.server.log(line)
+
+			indigo.server.log("completed log output")
+
+		except Exception as e:
+			self.logger.debug("log output Error: " + str(e))
+			indigo.server.log("    no log records exist")
+			indigo.server.log("completed log output")
+
+	def tail(self, f, n, offset=None):
+		"""Reads a n lines from f with an offset of offset lines.  The return
+		value is a tuple in the form ``(lines, has_more)`` where `has_more` is
+		an indicator that is `True` if there are more lines in the file.
+		"""
+		avg_line_length = 74
+		to_read = n + (offset or 0)
+
+		while 1:
+			try:
+				f.seek(-(avg_line_length * to_read), 2)
+			except IOError:
+				# woops.  apparently file is smaller than what we want
+				# to step back, go to the beginning instead
+				f.seek(0)
+			pos = f.tell()
+			lines = f.read().splitlines()
+			if len(lines) >= to_read or pos == 0:
+				return lines[-to_read:offset and -offset or None], \
+					   len(lines) > to_read or pos > 0
+			avg_line_length *= 1.3
 
 	def FilterAction(self, valuesDict, typeId = 0, devId = 0):
 		if valuesDict["filterAction"] == "edit":
