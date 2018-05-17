@@ -29,6 +29,7 @@ DEFAULT_POLLING_INTERVAL = 60  # number of seconds between each poll
 UPDATE_STATES_LIST = 15 # how frequently (in minutes) to update the state list
 DEFAULT_UPDATE_FREQUENCY = 24 # frequency of update check, in hours
 MAX_LOG_FILE_OUTPUT_LINES = 50
+LOG_PRUNE_FREQUENCY = 24 # how frequently to prune the logs to the MAX_LOG_FILE_OUTPUT_LINES length
 
 DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
@@ -49,7 +50,6 @@ class InfluxFilter(object):
 		else:
 			self.appliesToString = "specific devices"
 
-
 		if self.allDevices:
 			appliesto = "(all devices)"
 		else:
@@ -61,8 +61,6 @@ class InfluxFilter(object):
 			values = "percent: " + str(self.maxPercent)
 
 		self.name = self.state + " " + appliesto + " " + values
-
-
 
 class Plugin(indigo.PluginBase):
 	def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
@@ -197,6 +195,9 @@ class Plugin(indigo.PluginBase):
 
 		self.BuildConfigurationLists()
 		self.UpdateAll()
+
+		self.pruneFilterBlocksEventLog()
+		self.lastLogPrune = datetime.datetime.now()		
 
 	# called after runConcurrentThread() exits
 	def shutdown(self):
@@ -414,6 +415,11 @@ class Plugin(indigo.PluginBase):
 					if self.lastUpdateCheck < datetime.datetime.now()-datetime.timedelta(hours=DEFAULT_UPDATE_FREQUENCY):
 						self.updater.checkForUpdate(str(self.pluginVersion))
 						self.lastUpdateCheck = datetime.datetime.now()		
+
+					# prune the logs
+					if self.lastLogPrune < datetime.datetime.now()-datetime.timedelta(hours=LOG_PRUNE_FREQUENCY):
+						self.pruneFilterBlocksEventLog()
+						self.lastLogPrune = datetime.datetime.now()		
 
 				except Exception as e:
 					if self.debug:
@@ -1676,8 +1682,10 @@ class Plugin(indigo.PluginBase):
 		try:
 			indigo.server.log("Listing filter block log records (oldest to newest, maximum of " + str(MAX_LOG_FILE_OUTPUT_LINES) + " records):")
 			log_file = open(self.FilterLogFileLoc, "r")
+			lines = self.tail(log_file, MAX_LOG_FILE_OUTPUT_LINES)[0]
+			log_file.close()
 
-			for line in self.tail(log_file, MAX_LOG_FILE_OUTPUT_LINES)[0]:
+			for line in lines:
 				indigo.server.log(line)
 
 			indigo.server.log("completed log output")
@@ -1686,6 +1694,25 @@ class Plugin(indigo.PluginBase):
 			self.logger.debug("log output Error: " + str(e))
 			indigo.server.log("    no log records exist")
 			indigo.server.log("completed log output")
+
+	def pruneFilterBlocksEventLog(self):
+		self.logger.debug("entering pruneFilterBlocksEventLog()")
+		try:
+			log_file = open(self.FilterLogFileLoc, "r")
+			lines = self.tail(log_file, MAX_LOG_FILE_OUTPUT_LINES)[0]
+			log_file.close()
+
+			os.remove(self.FilterLogFileLoc)
+
+			with open(self.FilterLogFileLoc, "a") as logFile:
+				for line in lines:
+					logFile.write(line + '\n')
+
+		except Exception as e:
+			self.logger.debug("log prune error: " + str(e))
+			indigo.server.log("    no log records exist")
+
+		self.logger.debug("completed pruneFilterBlocksEventLog()")
 
 	def tail(self, f, n, offset=None):
 		"""Reads a n lines from f with an offset of offset lines.  The return
