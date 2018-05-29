@@ -1433,7 +1433,7 @@ class Plugin(indigo.PluginBase):
 
 		for item in self.DeviceIncludeList:
 			try:
-				self.DeviceIncludeListUI.append((item, indigo.devices[int(item)].name.replace(",", " ").replace(";", " ")))
+				self.DeviceIncludeListUI.append((int(item), indigo.devices[int(item)].name.replace(",", " ").replace(";", " ")))
 			except:
 				self.logger.error("could not find device " + item + " to add to the InfluxDB device list")
 				pass
@@ -1509,7 +1509,7 @@ class Plugin(indigo.PluginBase):
 ######
 	def AddDeviceToIncludedDeviceList(self, valuesDict, typeId="", devId=0):
 		self.DeviceIncludeList.append(int(valuesDict["menuAvailableDevices"]))
-		self.DeviceIncludeListUI.append((valuesDict["menuAvailableDevices"], indigo.devices[int(valuesDict["menuAvailableDevices"])].name.replace(",", " ").replace(";", " ")))
+		self.DeviceIncludeListUI.append((int(valuesDict["menuAvailableDevices"]), indigo.devices[int(valuesDict["menuAvailableDevices"])].name.replace(",", " ").replace(";", " ")))
 
 		for item in self.AvailableIncDevices:
 			if item[0] == int(valuesDict["menuAvailableDevices"]):
@@ -1525,8 +1525,12 @@ class Plugin(indigo.PluginBase):
 		for dev in valuesDict["listIncDevices"]:
 			indigodev = indigo.devices[int(dev)]
 
-			self.DeviceIncludeList.remove(indigodev.id)
-			self.DeviceIncludeListUI.remove((indigodev.id, indigodev.name))
+			try:
+				self.DeviceIncludeList.remove(indigodev.id)
+			except:
+				self.logger.error("error while removing device from the inclusion list")
+
+			self.DeviceIncludeListUI = [item for item in self.DeviceIncludeListUI if item[0] != indigodev.id]
 
 			self.AvailableIncDevices.append((indigodev.id, indigodev.name.replace(",", " ").replace(";", " ")))
 			self.AvailableExlDevices.append((indigodev.id, indigodev.name.replace(",", " ").replace(";", " ")))
@@ -1548,7 +1552,10 @@ class Plugin(indigo.PluginBase):
 			if self.ConfigDebug:
 				self.logger.debug("removing: " + str(state))
 
-			self.StatesIncludeList.remove(state)
+			try:
+				self.StatesIncludeList.remove(state)
+			except:
+				self.logger.error("error while removing state from inclusion list")
 
 			for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
 				if ui[0] == state:
