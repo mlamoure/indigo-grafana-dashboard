@@ -22,7 +22,6 @@ npm install
 grunt
 ```
 
-
 #### Roadmap
 
 * TODO: full annotation support
@@ -37,7 +36,10 @@ grunt
 * Direct link rendered image now works.
 * Support UTC date display
 * Fix display issue with 5.1
+* Merge distinct values in legend unless showing the name
 * Basic Annotation Support
+* Fix mapping numeric data to text
+
 
 ##### v0.0.7
 

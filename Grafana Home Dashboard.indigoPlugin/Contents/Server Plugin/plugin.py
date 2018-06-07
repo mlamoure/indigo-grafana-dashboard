@@ -21,7 +21,8 @@ import subprocess
 from subprocess import check_output
 import socket
 import signal
-from ghpu import GitHubPluginUpdater
+from distutils.version import LooseVersion
+import requests
 
 WAIT_POLLING_INTERVAL = 5 # used ocassionally to wait for a sequantal process to happen
 FAST_POLLING_INTERVAL = 5
@@ -116,9 +117,8 @@ class Plugin(indigo.PluginBase):
 		self.LastConfigRefresh = datetime.datetime.now()
 		self.lastInfluxConfigCheck = datetime.datetime.now()
 
-		self.updater = GitHubPluginUpdater(self)
-		self.updater.checkForUpdate(str(self.pluginVersion))
-		self.lastUpdateCheck = datetime.datetime.now()			
+		self.lastUpdateCheck = None
+		self.lastLogPrune = None
 
 	def startup(self):
 		try:
@@ -197,17 +197,43 @@ class Plugin(indigo.PluginBase):
 		self.UpdateAll()
 
 		self.pruneFilterBlocksEventLog()
-		self.lastLogPrune = datetime.datetime.now()		
+
+		self.version_check()
 
 	# called after runConcurrentThread() exits
 	def shutdown(self):
 		pass
 
-	def checkForUpdates(self):
-		self.updater.checkForUpdate()
+	def version_check(self):
+		pluginId = self.pluginId
+		self.lastUpdateCheck = datetime.datetime.now()		
 
-	def updatePlugin(self):
-		self.updater.update()
+		# Create some URLs we'll use later on
+		current_version_url = "https://api.indigodomo.com/api/v2/pluginstore/plugin-version-info.json?pluginId={}".format(pluginId)
+		store_detail_url = "https://www.indigodomo.com/pluginstore/{}/"
+		try:
+			# GET the url from the servers with a short timeout (avoids hanging the plugin)
+			reply = requests.get(current_version_url, timeout=5)
+			# This will raise an exception if the server returned an error
+			reply.raise_for_status()
+			# We now have a good reply so we get the json
+			reply_dict = reply.json()
+			plugin_dict = reply_dict["plugins"][0]
+			# Make sure that the 'latestRelease' element is a dict (could be a string for built-in plugins).
+			latest_release = plugin_dict["latestRelease"]
+			if isinstance(latest_release, dict):
+				# Compare the current version with the one returned in the reply dict
+				if LooseVersion(latest_release["number"]) > LooseVersion(self.pluginVersion):
+				# The release in the store is newer than the current version.
+				# We'll do a couple of things: first, we'll just log it
+				  self.logger.info(
+					"A new version of the plugin (v{}) is available at: {}".format(
+						latest_release["number"],
+						store_detail_url.format(plugin_dict["id"])
+					)
+				)
+		except Exception as exc:
+			self.logger.error(unicode(exc))
 
 	def connect(self):
 		self.logger.debug("running connect()")
@@ -413,13 +439,11 @@ class Plugin(indigo.PluginBase):
 
 					# check for plugin updates
 					if self.lastUpdateCheck < datetime.datetime.now()-datetime.timedelta(hours=DEFAULT_UPDATE_FREQUENCY):
-						self.updater.checkForUpdate(str(self.pluginVersion))
-						self.lastUpdateCheck = datetime.datetime.now()		
+						self.version_check()
 
 					# prune the logs
 					if self.lastLogPrune < datetime.datetime.now()-datetime.timedelta(hours=LOG_PRUNE_FREQUENCY):
 						self.pruneFilterBlocksEventLog()
-						self.lastLogPrune = datetime.datetime.now()		
 
 				except Exception as e:
 					if self.debug:
@@ -476,8 +500,8 @@ class Plugin(indigo.PluginBase):
 			if not found:
 				self.DeviceLastUpdatedList.append([dev.id, dev.lastChanged, False])
 
-			if datetime.datetime.now() + datetime.timedelta(minutes=UPDATE_STATES_LIST) < self.LastConfigRefresh:
-				self.logger.debug("    updating the states cache as it has gone stale")
+			if self.LastConfigRefresh + datetime.timedelta(minutes=UPDATE_STATES_LIST) < datetime.datetime.now():
+				self.logger.debug("    triggering a refresh of the configuration lists")
 				self.BuildConfigurationLists()
 
 			if needsUpdating:
@@ -1662,10 +1686,7 @@ class Plugin(indigo.PluginBase):
 		return valuesDict
 
 	def checkForUpdates(self):
-		self.updater.checkForUpdate()
-
-	def updatePlugin(self):
-		self.updater.update()
+		self.version_check()
 
 	def rebuildInflux(self):
 		indigo.server.log("rebuilding the InfluxDB server (will not delete data).  This occurs when the plugin is updated or if you've asked to manually rebuild the InfluxDB server.  The InfluxDB server will restart several times for this process to complete.")
@@ -1684,6 +1705,9 @@ class Plugin(indigo.PluginBase):
 
 	def ForceUpdate(self):
 		self.UpdateAll()
+
+	def rebuildConfig(self):
+		self.BuildConfigurationLists()
 
 	def printFilterBlocksEventLog(self):
 		try:
@@ -1704,6 +1728,8 @@ class Plugin(indigo.PluginBase):
 
 	def pruneFilterBlocksEventLog(self):
 		self.logger.debug("entering pruneFilterBlocksEventLog()")
+		self.lastLogPrune = datetime.datetime.now()
+
 		try:
 			log_file = open(self.FilterLogFileLoc, "r")
 			lines = self.tail(log_file, MAX_LOG_FILE_OUTPUT_LINES)[0]
