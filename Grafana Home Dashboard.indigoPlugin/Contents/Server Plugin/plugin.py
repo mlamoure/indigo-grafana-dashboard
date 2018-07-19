@@ -1343,7 +1343,7 @@ class Plugin(indigo.PluginBase):
 				else:
 					dev_id = item
 
-				if dev_id in indigo.devices:
+				if dev_id in indigo.devices and dev_id not in newDeviceIncludeList:
 					if self.ConfigDebug:
 						self.logger.debug("   validated included device: " + indigo.devices[dev_id].name)
 					newDeviceIncludeList.append(dev_id)
@@ -1416,6 +1416,8 @@ class Plugin(indigo.PluginBase):
 		self.LastConfigRefresh = datetime.datetime.now()
 
 		self.FullStateList = []
+		self.AvailableIncDevices = []
+		self.AvailableExlDevices = []
 
 		for dev in indigo.devices:
 			### STATES List
@@ -1439,7 +1441,6 @@ class Plugin(indigo.PluginBase):
 			### Excluded Devices Available		
 			if dev.id not in self.DeviceIncludeList:
 				self.AvailableExlDevices.append((dev.id, dev.name.replace(",", " ").replace(";", " ")))
-
 
 		########################
 

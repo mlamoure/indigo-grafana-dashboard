@@ -1,8 +1,10 @@
 import $ from 'jquery';
 import _ from 'lodash';
 
+import config from 'app/core/config';
 import coreModule from 'app/core/core_module';
 import appEvents from 'app/core/app_events';
+import { encodePathComponent } from 'app/core/utils/location_util';
 
 import Mousetrap from 'mousetrap';
 import 'mousetrap-global-bind';
@@ -13,7 +15,7 @@ export class KeybindingSrv {
   timepickerOpen = false;
 
   /** @ngInject */
-  constructor(private $rootScope, private $location) {
+  constructor(private $rootScope, private $location, private datasourceSrv, private timeSrv, private contextSrv) {
     // clear out all shortcuts on route change
     $rootScope.$on('$routeChangeSuccess', () => {
       Mousetrap.reset();
@@ -175,6 +177,25 @@ export class KeybindingSrv {
         });
       }
     });
+
+    // jump to explore if permissions allow
+    if (this.contextSrv.isEditor && config.exploreEnabled) {
+      this.bind('x', async () => {
+        if (dashboard.meta.focusPanelId) {
+          const panel = dashboard.getPanelById(dashboard.meta.focusPanelId);
+          const datasource = await this.datasourceSrv.get(panel.datasource);
+          if (datasource && datasource.supportsExplore) {
+            const range = this.timeSrv.timeRangeForUrl();
+            const state = {
+              ...datasource.getExploreState(panel),
+              range,
+            };
+            const exploreState = encodePathComponent(JSON.stringify(state));
+            this.$location.url(`/explore/${exploreState}`);
+          }
+        }
+      });
+    }
 
     // delete panel
     this.bind('p r', () => {

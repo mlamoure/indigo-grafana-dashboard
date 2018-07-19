@@ -7,7 +7,7 @@ export class DatasourceSrv {
   datasources: any;
 
   /** @ngInject */
-  constructor(private $q, private $injector, $rootScope, private templateSrv) {
+  constructor(private $q, private $injector, private $rootScope, private templateSrv) {
     this.init();
   }
 
@@ -15,7 +15,7 @@ export class DatasourceSrv {
     this.datasources = {};
   }
 
-  get(name) {
+  get(name?) {
     if (!name) {
       return this.get(config.defaultDatasource);
     }
@@ -61,7 +61,7 @@ export class DatasourceSrv {
         this.datasources[name] = instance;
         deferred.resolve(instance);
       })
-      .catch(function(err) {
+      .catch(err => {
         this.$rootScope.appEvent('alert-error', [dsConfig.name + ' plugin failed', err.toString()]);
       });
 
