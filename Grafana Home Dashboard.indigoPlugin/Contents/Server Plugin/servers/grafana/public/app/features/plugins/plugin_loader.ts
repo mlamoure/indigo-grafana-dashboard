@@ -65,7 +65,7 @@ System.config({
 });
 
 function exposeToPlugin(name: string, component: any) {
-  System.registerDynamic(name, [], true, function(require, exports, module) {
+  System.registerDynamic(name, [], true, (require, exports, module) => {
     module.exports = component;
   });
 }
@@ -126,6 +126,7 @@ import 'vendor/flot/jquery.flot.stackpercent';
 import 'vendor/flot/jquery.flot.fillbelow';
 import 'vendor/flot/jquery.flot.crosshair';
 import 'vendor/flot/jquery.flot.dashes';
+import 'vendor/flot/jquery.flot.gauge';
 
 const flotDeps = [
   'jquery.flot',
@@ -137,13 +138,14 @@ const flotDeps = [
   'jquery.flot.selection',
   'jquery.flot.stackpercent',
   'jquery.flot.events',
+  'jquery.flot.gauge',
 ];
-for (let flotDep of flotDeps) {
+for (const flotDep of flotDeps) {
   exposeToPlugin(flotDep, { fakeDep: 1 });
 }
 
 export function importPluginModule(path: string): Promise<any> {
-  let builtIn = builtInPlugins[path];
+  const builtIn = builtInPlugins[path];
   if (builtIn) {
     return Promise.resolve(builtIn);
   }
