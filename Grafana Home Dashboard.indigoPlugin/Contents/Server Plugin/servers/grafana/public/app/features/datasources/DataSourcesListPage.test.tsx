@@ -12,6 +12,10 @@ const setup = (propOverrides?: object) => {
     loadDataSources: jest.fn(),
     navModel: {} as NavModel,
     dataSourcesCount: 0,
+    searchQuery: '',
+    setDataSourcesSearchQuery: jest.fn(),
+    setDataSourcesLayoutMode: jest.fn(),
+    hasFetched: false,
   };
 
   Object.assign(props, propOverrides);
@@ -30,6 +34,7 @@ describe('Render', () => {
     const wrapper = setup({
       dataSources: getMockDataSources(5),
       dataSourcesCount: 5,
+      hasFetched: true,
     });
 
     expect(wrapper).toMatchSnapshot();

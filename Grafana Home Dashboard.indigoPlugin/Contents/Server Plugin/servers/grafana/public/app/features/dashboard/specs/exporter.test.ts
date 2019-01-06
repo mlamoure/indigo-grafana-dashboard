@@ -250,5 +250,5 @@ stubs['-- Grafana --'] = {
 };
 
 function getStub(arg) {
-  return Promise.resolve(stubs[arg]);
+  return Promise.resolve(stubs[arg || 'gfdb']);
 }

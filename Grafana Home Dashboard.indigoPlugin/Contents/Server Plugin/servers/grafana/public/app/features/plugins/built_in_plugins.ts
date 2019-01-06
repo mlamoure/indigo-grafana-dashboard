@@ -14,6 +14,8 @@ import * as testDataDSPlugin from 'app/plugins/datasource/testdata/module';
 import * as stackdriverPlugin from 'app/plugins/datasource/stackdriver/module';
 
 import * as textPanel from 'app/plugins/panel/text/module';
+import * as text2Panel from 'app/plugins/panel/text2/module';
+import * as graph2Panel from 'app/plugins/panel/graph2/module';
 import * as graphPanel from 'app/plugins/panel/graph/module';
 import * as dashListPanel from 'app/plugins/panel/dashlist/module';
 import * as pluginsListPanel from 'app/plugins/panel/pluginlist/module';
@@ -22,6 +24,7 @@ import * as heatmapPanel from 'app/plugins/panel/heatmap/module';
 import * as tablePanel from 'app/plugins/panel/table/module';
 import * as singlestatPanel from 'app/plugins/panel/singlestat/module';
 import * as gettingStartedPanel from 'app/plugins/panel/gettingstarted/module';
+import * as gaugePanel from 'app/plugins/panel/gauge/module';
 
 const builtInPlugins = {
   'app/plugins/datasource/graphite/module': graphitePlugin,
@@ -40,6 +43,8 @@ const builtInPlugins = {
   'app/plugins/datasource/stackdriver/module': stackdriverPlugin,
 
   'app/plugins/panel/text/module': textPanel,
+  'app/plugins/panel/text2/module': text2Panel,
+  'app/plugins/panel/graph2/module': graph2Panel,
   'app/plugins/panel/graph/module': graphPanel,
   'app/plugins/panel/dashlist/module': dashListPanel,
   'app/plugins/panel/pluginlist/module': pluginsListPanel,
@@ -48,6 +53,7 @@ const builtInPlugins = {
   'app/plugins/panel/table/module': tablePanel,
   'app/plugins/panel/singlestat/module': singlestatPanel,
   'app/plugins/panel/gettingstarted/module': gettingStartedPanel,
+  'app/plugins/panel/gauge/module': gaugePanel,
 };
 
 export default builtInPlugins;

@@ -74,7 +74,7 @@ export class TeamMembers extends PureComponent<Props, State> {
         </td>
         <td>{member.login}</td>
         <td>{member.email}</td>
-        {syncEnabled ? this.renderLabels(member.labels) : ''}
+        {syncEnabled && this.renderLabels(member.labels)}
         <td className="text-right">
           <DeleteButton onConfirmDelete={() => this.onRemoveMember(member)} />
         </td>
@@ -83,10 +83,8 @@ export class TeamMembers extends PureComponent<Props, State> {
   }
 
   render() {
-    const { newTeamMember, isAdding } = this.state;
+    const { isAdding } = this.state;
     const { searchMemberQuery, members, syncEnabled } = this.props;
-    const newTeamMemberValue = newTeamMember && newTeamMember.id.toString();
-
     return (
       <div>
         <div className="page-action-bar">
@@ -117,8 +115,7 @@ export class TeamMembers extends PureComponent<Props, State> {
             </button>
             <h5>Add Team Member</h5>
             <div className="gf-form-inline">
-              <UserPicker onSelected={this.onUserSelected} className="width-30" value={newTeamMemberValue} />
-
+              <UserPicker onSelected={this.onUserSelected} className="min-width-30" />
               {this.state.newTeamMember && (
                 <button className="btn btn-success gf-form-btn" type="submit" onClick={this.onAddUserToTeam}>
                   Add to team
@@ -135,7 +132,7 @@ export class TeamMembers extends PureComponent<Props, State> {
                 <th />
                 <th>Name</th>
                 <th>Email</th>
-                {syncEnabled ? <th /> : ''}
+                {syncEnabled && <th />}
                 <th style={{ width: '1%' }} />
               </tr>
             </thead>
