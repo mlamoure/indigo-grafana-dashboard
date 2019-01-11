@@ -136,7 +136,11 @@ class Plugin(indigo.PluginBase):
 			self.DisableGrafana = self.pluginPrefs.get('DisableGrafana', False)
 			self.GrafanaPort = self.pluginPrefs.get('GrafanaPort', '3006')
 			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
-			self.miniumumUpdateFrequency = int(self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60))
+
+			if self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60) == "smart":
+				self.miniumumUpdateFrequency = "smart"
+			else:
+				self.miniumumUpdateFrequency = int(self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60))
 
 			# Debug Preferences
 			self.debug = self.pluginPrefs.get("ServerDebug", False)
@@ -202,7 +206,8 @@ class Plugin(indigo.PluginBase):
 
 	# called after runConcurrentThread() exits
 	def shutdown(self):
-		pass
+		self.StopInfluxServer()
+		self.StopGrafanaServer()
 
 	def version_check(self):
 		pluginId = self.pluginId
@@ -424,7 +429,7 @@ class Plugin(indigo.PluginBase):
 						self.restartGrafana()
 
 					# Check if Influx is not auth enabled
-					elif self.connected and self.lastInfluxConfigCheck + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now() and not self.ExternalDB and not self.CheckInfluxAuthConfig():
+					elif self.connected and self.lastInfluxConfigCheck + datetime.timedelta(minutes=10) < datetime.datetime.now() and not self.ExternalDB and not self.CheckInfluxAuthConfig():
 						self.lastInfluxConfigCheck = datetime.datetime.now()
 						self.logger.debug("scheduling a Influx admin reset since it was discovered that auth was disabled")
 						self.pollingInterval = FAST_POLLING_INTERVAL
@@ -485,7 +490,13 @@ class Plugin(indigo.PluginBase):
 					found = True
 					locked = devSearch[2]
 
-					if devSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now() and not locked:
+					if self.miniumumUpdateFrequency == "smart" and ((datetime.datetime.now().hour == 0 and datetime.datetime.now().minute < 15) or (datetime.datetime.now().hour == 23 and datetime.datetime.now().minute > 45)) and devSearch[1] + datetime.timedelta(minutes=5) < datetime.datetime.now() and not locked:
+						if self.TransportDebug:
+							self.logger.debug("    SMART minimum update period for device expired: " + dev.name + ", prior update timestamp: " + str(devSearch[1]))
+
+						needsUpdating = True
+						devSearch[1] = datetime.datetime.now()
+					elif devSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now() and not locked:
 						if self.TransportDebug:
 							self.logger.debug("    minimum update period for device expired: " + dev.name + ", prior update timestamp: " + str(devSearch[1]))
 
@@ -517,7 +528,14 @@ class Plugin(indigo.PluginBase):
 				if varSearch[0] == var.id:
 					found = True
 
-					if varSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now():
+					if self.miniumumUpdateFrequency == "smart" and ((datetime.datetime.now().hour == 0 and datetime.datetime.now().minute < 15) or (datetime.datetime.now().hour == 23 and datetime.datetime.now().minute > 45)) and varSearch[1] + datetime.timedelta(minutes=5) < datetime.datetime.now():
+						if self.TransportDebug:
+							self.logger.debug("    SMART minimum update period for variable expired: " + var.name + ", prior update timestamp: " + str(varSearch[1]))
+
+						needsUpdating = True
+						varSearch[1] = datetime.datetime.now()
+					
+					elif varSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now():
 						if self.TransportDebug:
 							self.logger.debug("    minimum update period for variable expired: " + var.name + ", prior update timestamp: " + str(varSearch[1]))
 
@@ -1319,7 +1337,10 @@ class Plugin(indigo.PluginBase):
 				self.QuietConnectionError = False
 				self.connect()
 
-			self.miniumumUpdateFrequency = int(valuesDict["MinimumUpdateFrequency"])
+			if valuesDict["MinimumUpdateFrequency"] == "smart":
+				self.miniumumUpdateFrequency = "smart"
+			else:
+				self.miniumumUpdateFrequency = int(valuesDict["MinimumUpdateFrequency"])
 
 			# Reset the Exclude List to the selected devices that are selected in the list box
 			self.DeviceExcludeList = []

@@ -308,6 +308,7 @@
 				<Option value="15">15 Minutes</Option>
 				<Option value="30">30 Minutes</Option>
 				<Option value="60">60 Minutes</Option>
+				<Option value="smart">Smart -- at the beginning / end of each day</Option>
 				<Option value="-1">Disabled</Option>
 			</List>
 		</Field>			
