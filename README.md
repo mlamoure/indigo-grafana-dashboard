@@ -16,6 +16,7 @@ Both InfluxDB and Grafana are included within the plugin, nothing is installed o
 [https://github.com/mlamoure/indigo-grafana-dashboard/wiki]
 
 # Requirements #
+* OS X 10.8 or higher
 Be aware of the system requirements for InfluxDB.
 * InfluxDB System Requirements - [https://docs.influxdata.com/influxdb/v1.5/guides/hardware_sizing/]
 
