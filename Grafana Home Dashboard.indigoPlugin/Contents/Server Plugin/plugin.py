@@ -1643,14 +1643,13 @@ class Plugin(indigo.PluginBase):
 			self.logger.debug("PrintDeviceToEventLog(): sending entire device to diff_to_json for device: " + dev.name)
 			newjson = self.adaptor.diff_to_json(dev, [], False)
 		else:
-			self.logger.debug("PrintDeviceToEventLog(): sending only included states to diff_to_json for device: " + dev.name)
-			newjson = self.adaptor.diff_to_json(dev, self.StatesIncludeList, False)
+			newjson = self.adaptor.diff_to_json(dev, [], False)
 
 		if newjson is None:
 			self.logger.info("   the device: \"" + dev.name + "\" is not excluded from updates to InfluxDB, but it contains no states/properties that are capable of being sent to Influx/Grafana.")			
 
 		else:
-			for kk, vv in newjson.iteritems():
+			for kk, vv in sorted(newjson.iteritems()):
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 					if (kk in self.StatesIncludeList or included) and not excluded:
 						status = " (INCLUDED)"

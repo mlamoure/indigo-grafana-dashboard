@@ -173,14 +173,15 @@ class JSONAdaptor():
 			# Check if it's changed
 			if kk not in localcache or localcache[kk] != vv or not updateCheck:
 
-				try:
-					if kk in localcache and isinstance(vv, basestring) and (str(localcache[kk]).encode('utf-8').lower() == str(vv).encode('utf-8').lower() or len(str(vv).encode('utf-8')) == 0):
-						if self.TransportDebugL2:
-							self.logger.debug('NOT sending property: ' + kk + " to InfluxDB for device: " + device.name + " because the value NOT has changed.  Prev value: " + str(localcache[kk]) + ", new value: " + str(vv))
+				if updateCheck:
+					try:
+						if kk in localcache and isinstance(vv, basestring) and (str(localcache[kk]).encode('utf-8').lower() == str(vv).encode('utf-8').lower() or len(str(vv).encode('utf-8')) == 0):
+							if self.TransportDebugL2:
+								self.logger.debug('NOT sending property: ' + kk + " to InfluxDB for device: " + device.name + " because the value NOT has changed.  Prev value: " + str(localcache[kk]) + ", new value: " + str(vv))
 
-						continue
-				except:
-					pass
+							continue
+					except:
+						pass
 
 				# either the key is in the include states, the entire device needs to be sent
 				if (kk in includeStates) or len(includeStates) == 0:
