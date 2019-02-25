@@ -1,11 +1,11 @@
 import React from 'react';
-import AsyncSelect from 'react-select/lib/Async';
+import { NoOptionsMessage, IndicatorsContainer, resetSelectStyles } from '@grafana/ui';
+import AsyncSelect from '@torkelo/react-select/lib/Async';
+
 import { TagOption } from './TagOption';
 import { TagBadge } from './TagBadge';
-import IndicatorsContainer from 'app/core/components/Picker/IndicatorsContainer';
-import NoOptionsMessage from 'app/core/components/Picker/NoOptionsMessage';
-import { components } from 'react-select';
-import ResetStyles from 'app/core/components/Picker/ResetStyles';
+import { components } from '@torkelo/react-select';
+import { escapeStringForRegex } from '../FilterInput/FilterInput';
 
 export interface Props {
   tags: string[];
@@ -50,9 +50,9 @@ export class TagFilter extends React.Component<Props, any> {
       getOptionValue: i => i.value,
       getOptionLabel: i => i.label,
       value: tags,
-      styles: ResetStyles,
+      styles: resetSelectStyles(),
       filterOption: (option, searchQuery) => {
-        const regex = RegExp(searchQuery, 'i');
+        const regex = RegExp(escapeStringForRegex(searchQuery), 'i');
         return regex.test(option.value);
       },
       components: {

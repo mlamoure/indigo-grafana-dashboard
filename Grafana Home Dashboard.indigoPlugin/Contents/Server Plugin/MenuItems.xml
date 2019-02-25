@@ -222,11 +222,4 @@
         <CallbackMethod>rebuildConfig</CallbackMethod>
     </MenuItem>
 
-    <MenuItem id="sep_update"/>
-
-    <MenuItem id="checkForUpdates">
-        <Name>Check for Updates</Name>
-        <CallbackMethod>checkForUpdates</CallbackMethod>
-    </MenuItem>
-
 </MenuItems>
