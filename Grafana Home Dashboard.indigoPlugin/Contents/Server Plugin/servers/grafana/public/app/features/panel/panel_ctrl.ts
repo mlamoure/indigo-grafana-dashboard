@@ -1,5 +1,6 @@
 import _ from 'lodash';
 import Remarkable from 'remarkable';
+import { sanitize, escapeHtml } from 'app/core/utils/text';
 
 import config from 'app/core/config';
 import { profiler } from 'app/core/core';
@@ -11,9 +12,10 @@ import {
   copyPanel as copyPanelUtil,
   editPanelJson as editPanelJsonUtil,
   sharePanel as sharePanelUtil,
+  calculateInnerPanelHeight,
 } from 'app/features/dashboard/utils/panel';
 
-import { GRID_COLUMN_COUNT, PANEL_HEADER_HEIGHT, PANEL_BORDER } from 'app/core/constants';
+import { GRID_COLUMN_COUNT } from 'app/core/constants';
 
 export class PanelCtrl {
   panel: any;
@@ -119,7 +121,7 @@ export class PanelCtrl {
     menu.push({
       text: 'View',
       click: 'ctrl.viewPanel();',
-      icon: 'fa fa-fw fa-eye',
+      icon: 'gicon gicon-viewer',
       shortcut: 'v',
     });
 
@@ -128,7 +130,7 @@ export class PanelCtrl {
         text: 'Edit',
         click: 'ctrl.editPanel();',
         role: 'Editor',
-        icon: 'fa fa-fw fa-edit',
+        icon: 'gicon gicon-editor',
         shortcut: 'e',
       });
     }
@@ -202,7 +204,7 @@ export class PanelCtrl {
 
   calculatePanelHeight(containerHeight) {
     this.containerHeight = containerHeight;
-    this.height = this.containerHeight - (PANEL_BORDER + PANEL_HEADER_HEIGHT);
+    this.height = calculateInnerPanelHeight(this.panel, containerHeight);
   }
 
   render(payload?) {
@@ -249,31 +251,32 @@ export class PanelCtrl {
       markdown = this.error || this.panel.description;
     }
 
-    const linkSrv = this.$injector.get('linkSrv');
-    const sanitize = this.$injector.get('$sanitize');
-    const templateSrv = this.$injector.get('templateSrv');
+    const linkSrv: any = this.$injector.get('linkSrv');
+    const templateSrv: any = this.$injector.get('templateSrv');
     const interpolatedMarkdown = templateSrv.replace(markdown, this.panel.scopedVars);
     let html = '<div class="markdown-html">';
 
-    html += new Remarkable().render(interpolatedMarkdown);
+    const md = new Remarkable().render(interpolatedMarkdown);
+    html += config.disableSanitizeHtml ? md : sanitize(md);
 
     if (this.panel.links && this.panel.links.length > 0) {
       html += '<ul>';
       for (const link of this.panel.links) {
         const info = linkSrv.getPanelLinkAnchorInfo(link, this.panel.scopedVars);
+
         html +=
           '<li><a class="panel-menu-link" href="' +
-          info.href +
+          escapeHtml(info.href) +
           '" target="' +
-          info.target +
+          escapeHtml(info.target) +
           '">' +
-          info.title +
+          escapeHtml(info.title) +
           '</a></li>';
       }
       html += '</ul>';
     }
 
     html += '</div>';
-    return sanitize(html);
+    return html;
   }
 }
