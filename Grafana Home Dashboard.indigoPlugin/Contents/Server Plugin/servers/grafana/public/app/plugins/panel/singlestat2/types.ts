@@ -1,4 +1,5 @@
-import { VizOrientation, ReducerID, SingleStatBaseOptions, FieldDisplayOptions } from '@grafana/ui';
+import { VizOrientation, SingleStatBaseOptions, FieldDisplayOptions } from '@grafana/ui';
+import { ReducerID } from '@grafana/data';
 
 export interface SparklineOptions {
   show: boolean;
@@ -12,22 +13,26 @@ export interface SingleStatOptions extends SingleStatBaseOptions {
   prefixFontSize?: string;
   valueFontSize?: string;
   postfixFontSize?: string;
-
   colorBackground?: boolean;
   colorValue?: boolean;
   colorPrefix?: boolean;
   colorPostfix?: boolean;
-
   sparkline: SparklineOptions;
 }
 
 export const standardFieldDisplayOptions: FieldDisplayOptions = {
   values: false,
   calcs: [ReducerID.mean],
-  defaults: {},
+  defaults: {
+    min: 0,
+    max: 100,
+    thresholds: [
+      { value: -Infinity, color: 'green' },
+      { value: 80, color: 'red' }, // 80%
+    ],
+    mappings: [],
+  },
   override: {},
-  mappings: [],
-  thresholds: [{ index: 0, value: -Infinity, color: 'green' }, { index: 1, value: 80, color: 'red' }],
 };
 
 export const defaults: SingleStatOptions = {

@@ -27,6 +27,7 @@ import requests
 WAIT_POLLING_INTERVAL = 5 # used ocassionally to wait for a sequantal process to happen
 FAST_POLLING_INTERVAL = 5
 DEFAULT_POLLING_INTERVAL = 60  # number of seconds between each poll
+LONG_POLLING_INTERVAL = 60 * 15
 UPDATE_STATES_LIST = 15 # how frequently (in minutes) to update the state list
 DEFAULT_UPDATE_FREQUENCY = 24 # frequency of update check, in hours
 MAX_LOG_FILE_OUTPUT_LINES = 50
@@ -265,7 +266,8 @@ class Plugin(indigo.PluginBase):
 			self.logger.debug("   connection attempt " + str(self.ConnectionRetryCount) + ": error while connecting to InfluxDB: " + str(e))
 
 			# speed up the polling interval to make the connection attempts quicker
-			self.pollingInterval = FAST_POLLING_INTERVAL
+			if not self.ExternalDB:
+				self.pollingInterval = FAST_POLLING_INTERVAL
 			
 			# Check to see if there is a admin user account issue, and, if so, trigger a admin refresh.
 			if "authorization failed" in str(e).lower():
@@ -286,13 +288,12 @@ class Plugin(indigo.PluginBase):
 					self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
 
 				self.QuietConnectionError = True
-			elif self.ConnectionRetryCount == 12:
-				if not self.ExternalDB:
-					self.logger.error("error while attempting to connect to internal InfluxDB Server after " + str(self.ConnectionRetryCount) + " attempts, stopping attempts.  Please check your configuration or contact support.  Error: " + str(e))
-				else:
-					self.logger.error("error while connecting to InfluxDB after " + str(self.ConnectionRetryCount) + " attempts, please check configuration.  Most recent connection error: " + str(e))
-
+			elif self.ConnectionRetryCount == 12 and not self.ExternalDB:
+				self.logger.error("error while attempting to connect to internal InfluxDB Server after " + str(self.ConnectionRetryCount) + " attempts, stopping attempts.  Please check your configuration or contact support.  Error: " + str(e))
 				self.StopConnectionAttempts = True
+			elif self.ConnectionRetryCount > 10 and self.ExternalDB:
+				self.pollingInterval = LONG_POLLING_INTERVAL
+				self.logger.error("error while connecting to InfluxDB after " + str(self.ConnectionRetryCount) + " attempts, will now attempt silently every 15 minutes.  Most recent connection error: " + str(e))
 
 			# every 10 connection attempts retry starting the Influx server
 			if (self.ConnectionRetryCount == 2 or self.ConnectionRetryCount%10 == 0) and not self.ExternalDB and not self.triggerInfluxRestart and not self.badInfluxConfig:

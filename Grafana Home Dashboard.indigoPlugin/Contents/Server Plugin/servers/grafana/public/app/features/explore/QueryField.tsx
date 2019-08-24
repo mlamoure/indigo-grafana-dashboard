@@ -15,10 +15,10 @@ import ClearPlugin from './slate-plugins/clear';
 import NewlinePlugin from './slate-plugins/newline';
 
 import { TypeaheadWithTheme } from './Typeahead';
-import { makeFragment, makeValue } from './Value';
-import PlaceholdersBuffer from './PlaceholdersBuffer';
+import { makeFragment, makeValue } from '@grafana/ui';
 
 export const TYPEAHEAD_DEBOUNCE = 100;
+export const HIGHLIGHT_WAIT = 500;
 
 function getSuggestionByIndex(suggestions: CompletionItemGroup[], index: number): CompletionItem {
   // Flatten suggestion groups
@@ -36,8 +36,8 @@ export interface QueryFieldProps {
   cleanText?: (text: string) => string;
   disabled?: boolean;
   initialQuery: string | null;
-  onExecuteQuery?: () => void;
-  onQueryChange?: (value: string) => void;
+  onRunQuery?: () => void;
+  onChange?: (value: string) => void;
   onTypeahead?: (typeahead: TypeaheadInput) => TypeaheadOutput;
   onWillApplySuggestion?: (suggestion: string, state: QueryFieldState) => string;
   placeholder?: string;
@@ -52,7 +52,7 @@ export interface QueryFieldState {
   typeaheadIndex: number;
   typeaheadPrefix: string;
   typeaheadText: string;
-  value: Value;
+  value: any;
   lastExecutedValue: Value;
 }
 
@@ -73,15 +73,15 @@ export interface TypeaheadInput {
  */
 export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldState> {
   menuEl: HTMLElement | null;
-  placeholdersBuffer: PlaceholdersBuffer;
   plugins: any[];
   resetTimer: any;
   mounted: boolean;
+  updateHighlightsTimer: any;
 
   constructor(props: QueryFieldProps, context: Context<any>) {
     super(props, context);
 
-    this.placeholdersBuffer = new PlaceholdersBuffer(props.initialQuery || '');
+    this.updateHighlightsTimer = _.debounce(this.updateLogsHighlights, HIGHLIGHT_WAIT);
 
     // Base plugins
     this.plugins = [ClearPlugin(), NewlinePlugin(), ...(props.additionalPlugins || [])].filter(p => p);
@@ -92,7 +92,7 @@ export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldS
       typeaheadIndex: 0,
       typeaheadPrefix: '',
       typeaheadText: '',
-      value: makeValue(this.placeholdersBuffer.toString(), props.syntax),
+      value: makeValue(props.initialQuery || '', props.syntax),
       lastExecutedValue: null,
     };
   }
@@ -115,8 +115,7 @@ export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldS
     if (initialQuery !== prevProps.initialQuery) {
       // and we have a version that differs
       if (initialQuery !== Plain.serialize(value)) {
-        this.placeholdersBuffer = new PlaceholdersBuffer(initialQuery || '');
-        this.setState({ value: makeValue(this.placeholdersBuffer.toString(), syntax) });
+        this.setState({ value: makeValue(initialQuery, syntax) });
       }
     }
 
@@ -133,9 +132,7 @@ export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldS
         .change()
         .insertText(' ')
         .deleteBackward();
-      if (this.placeholdersBuffer.hasPlaceholders()) {
-        change.move(this.placeholdersBuffer.getNextMoveOffset()).focus();
-      }
+
       this.onChange(change, true);
     }
   }
@@ -149,10 +146,10 @@ export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldS
       if (documentChanged) {
         const textChanged = Plain.serialize(prevValue) !== Plain.serialize(value);
         if (textChanged && invokeParentOnValueChanged) {
-          this.executeOnQueryChangeAndExecuteQueries();
+          this.executeOnChangeAndRunQueries();
         }
         if (textChanged && !invokeParentOnValueChanged) {
-          this.updateLogsHighlights();
+          this.updateHighlightsTimer();
         }
       }
     });
@@ -167,21 +164,22 @@ export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldS
   };
 
   updateLogsHighlights = () => {
-    const { onQueryChange } = this.props;
-    if (onQueryChange) {
-      onQueryChange(Plain.serialize(this.state.value));
+    const { onChange } = this.props;
+
+    if (onChange) {
+      onChange(Plain.serialize(this.state.value));
     }
   };
 
-  executeOnQueryChangeAndExecuteQueries = () => {
+  executeOnChangeAndRunQueries = () => {
     // Send text change to parent
-    const { onQueryChange, onExecuteQuery } = this.props;
-    if (onQueryChange) {
-      onQueryChange(Plain.serialize(this.state.value));
+    const { onChange, onRunQuery } = this.props;
+    if (onChange) {
+      onChange(Plain.serialize(this.state.value));
     }
 
-    if (onExecuteQuery) {
-      onExecuteQuery();
+    if (onRunQuery) {
+      onRunQuery();
       this.setState({ lastExecutedValue: this.state.value });
     }
   };
@@ -309,31 +307,23 @@ export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldS
 
   handleEnterAndTabKey = (event: KeyboardEvent, change: Change) => {
     const { typeaheadIndex, suggestions } = this.state;
-    if (this.menuEl) {
-      // Dont blur input
-      event.preventDefault();
-      if (!suggestions || suggestions.length === 0) {
-        return undefined;
-      }
+    event.preventDefault();
 
-      const suggestion = getSuggestionByIndex(suggestions, typeaheadIndex);
-      const nextChange = this.applyTypeahead(change, suggestion);
-
-      const insertTextOperation = nextChange.operations.find((operation: any) => operation.type === 'insert_text');
-      if (insertTextOperation) {
-        const suggestionText = insertTextOperation.text;
-        this.placeholdersBuffer.setNextPlaceholderValue(suggestionText);
-        if (this.placeholdersBuffer.hasPlaceholders()) {
-          nextChange.move(this.placeholdersBuffer.getNextMoveOffset()).focus();
-        }
-      }
-
+    if (event.shiftKey) {
+      // pass through if shift is pressed
+      return undefined;
+    } else if (!this.menuEl) {
+      this.executeOnChangeAndRunQueries();
       return true;
-    } else {
-      this.executeOnQueryChangeAndExecuteQueries();
-
+    } else if (!suggestions || suggestions.length === 0) {
       return undefined;
     }
+
+    const suggestion = getSuggestionByIndex(suggestions, typeaheadIndex);
+    const nextChange = this.applyTypeahead(change, suggestion);
+
+    const insertTextOperation = nextChange.operations.find((operation: any) => operation.type === 'insert_text');
+    return insertTextOperation ? true : undefined;
   };
 
   onKeyDown = (event: KeyboardEvent, change: Change) => {
@@ -409,11 +399,9 @@ export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldS
     // If we dont wait here, menu clicks wont work because the menu
     // will be gone.
     this.resetTimer = setTimeout(this.resetTypeahead, 100);
-    // Disrupting placeholder entry wipes all remaining placeholders needing input
-    this.placeholdersBuffer.clearPlaceholders();
 
     if (previousValue !== currentValue) {
-      this.executeOnQueryChangeAndExecuteQueries();
+      this.executeOnChangeAndRunQueries();
     }
   };
 
@@ -426,6 +414,10 @@ export class QueryField extends React.PureComponent<QueryFieldProps, QueryFieldS
   updateMenu = () => {
     const { suggestions } = this.state;
     const menu = this.menuEl;
+    // Exit for unit tests
+    if (!window.getSelection) {
+      return;
+    }
     const selection = window.getSelection();
     const node = selection.anchorNode;
 

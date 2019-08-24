@@ -10,10 +10,15 @@ import templateSrv from 'app/features/templating/template_srv';
 import { PanelQueryState } from './PanelQueryState';
 
 // Types
-import { PanelData, DataQuery, TimeRange, ScopedVars, DataQueryRequest, DataSourceApi } from '@grafana/ui';
+import { PanelData, DataQuery, ScopedVars, DataQueryRequest, DataSourceApi, DataSourceJsonData } from '@grafana/ui';
 
-export interface QueryRunnerOptions<TQuery extends DataQuery = DataQuery> {
-  datasource: string | DataSourceApi<TQuery>;
+import { TimeRange } from '@grafana/data';
+
+export interface QueryRunnerOptions<
+  TQuery extends DataQuery = DataQuery,
+  TOptions extends DataSourceJsonData = DataSourceJsonData
+> {
+  datasource: string | DataSourceApi<TQuery, TOptions>;
   queries: TQuery[];
   panelId: number;
   dashboardId?: number;

@@ -1,6 +1,6 @@
 import _ from 'lodash';
-import Remarkable from 'remarkable';
 import { sanitize, escapeHtml } from 'app/core/utils/text';
+import { renderMarkdown } from '@grafana/data';
 
 import config from 'app/core/config';
 import { profiler } from 'app/core/core';
@@ -16,6 +16,9 @@ import {
 } from 'app/features/dashboard/utils/panel';
 
 import { GRID_COLUMN_COUNT } from 'app/core/constants';
+import { auto } from 'angular';
+import { TemplateSrv } from '../templating/template_srv';
+import { LinkSrv } from './panellinks/link_srv';
 
 export class PanelCtrl {
   panel: any;
@@ -25,7 +28,7 @@ export class PanelCtrl {
   pluginId: string;
   editorTabs: any;
   $scope: any;
-  $injector: any;
+  $injector: auto.IInjectorService;
   $location: any;
   $timeout: any;
   inspector: any;
@@ -37,7 +40,7 @@ export class PanelCtrl {
   timing: any;
   maxPanelsPerRowOptions: number[];
 
-  constructor($scope, $injector) {
+  constructor($scope: any, $injector: auto.IInjectorService) {
     this.$injector = $injector;
     this.$location = $injector.get('$location');
     this.$scope = $scope;
@@ -61,21 +64,21 @@ export class PanelCtrl {
   }
 
   renderingCompleted() {
-    profiler.renderingCompleted(this.panel.id);
+    profiler.renderingCompleted();
   }
 
   refresh() {
     this.panel.refresh();
   }
 
-  publishAppEvent(evtName, evt) {
+  publishAppEvent(evtName: string, evt: any) {
     this.$scope.$root.appEvent(evtName, evt);
   }
 
-  changeView(fullscreen, edit) {
+  changeView(fullscreen: boolean, edit: boolean) {
     this.publishAppEvent('panel-change-view', {
-      fullscreen: fullscreen,
-      edit: edit,
+      fullscreen,
+      edit,
       panelId: this.panel.id,
     });
   }
@@ -100,7 +103,7 @@ export class PanelCtrl {
     }
   }
 
-  addEditorTab(title, directiveFn, index?, icon?) {
+  addEditorTab(title: string, directiveFn: any, index?: number, icon?: any) {
     const editorTab = { title, directiveFn, icon };
 
     if (_.isString(directiveFn)) {
@@ -194,7 +197,7 @@ export class PanelCtrl {
   }
 
   // Override in sub-class to add items before extended menu
-  getAdditionalMenuItems() {
+  getAdditionalMenuItems(): any[] {
     return [];
   }
 
@@ -202,12 +205,12 @@ export class PanelCtrl {
     return this.dashboard.meta.fullscreen && !this.panel.fullscreen;
   }
 
-  calculatePanelHeight(containerHeight) {
+  calculatePanelHeight(containerHeight: number) {
     this.containerHeight = containerHeight;
     this.height = calculateInnerPanelHeight(this.panel, containerHeight);
   }
 
-  render(payload?) {
+  render(payload?: any) {
     this.events.emit('render', payload);
   }
 
@@ -244,26 +247,25 @@ export class PanelCtrl {
     return '';
   }
 
-  getInfoContent(options) {
-    let markdown = this.panel.description;
+  getInfoContent(options: { mode: string }) {
+    let markdown = this.panel.description || '';
 
     if (options.mode === 'tooltip') {
-      markdown = this.error || this.panel.description;
+      markdown = this.error || this.panel.description || '';
     }
 
-    const linkSrv: any = this.$injector.get('linkSrv');
-    const templateSrv: any = this.$injector.get('templateSrv');
+    const linkSrv: LinkSrv = this.$injector.get('linkSrv');
+    const templateSrv: TemplateSrv = this.$injector.get('templateSrv');
     const interpolatedMarkdown = templateSrv.replace(markdown, this.panel.scopedVars);
-    let html = '<div class="markdown-html">';
+    let html = '<div class="markdown-html panel-info-content">';
 
-    const md = new Remarkable().render(interpolatedMarkdown);
+    const md = renderMarkdown(interpolatedMarkdown);
     html += config.disableSanitizeHtml ? md : sanitize(md);
 
     if (this.panel.links && this.panel.links.length > 0) {
-      html += '<ul>';
+      html += '<ul class="panel-info-corner-links">';
       for (const link of this.panel.links) {
-        const info = linkSrv.getPanelLinkAnchorInfo(link, this.panel.scopedVars);
-
+        const info = linkSrv.getDataLinkUIModel(link, this.panel.scopedVars);
         html +=
           '<li><a class="panel-menu-link" href="' +
           escapeHtml(info.href) +

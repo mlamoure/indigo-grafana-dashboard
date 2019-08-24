@@ -69,7 +69,7 @@ export class KeybindingSrv {
   }
 
   exit() {
-    const popups = $('.popover.in');
+    const popups = $('.popover.in, .slate-typeahead');
     if (popups.length > 0) {
       return;
     }
@@ -160,11 +160,11 @@ export class KeybindingSrv {
     });
 
     this.bind('t left', () => {
-      scope.appEvent('shift-time-backward');
+      scope.appEvent('shift-time', -1);
     });
 
     this.bind('t right', () => {
-      scope.appEvent('shift-time-forward');
+      scope.appEvent('shift-time', 1);
     });
 
     // edit panel

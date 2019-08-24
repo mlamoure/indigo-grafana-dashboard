@@ -112,6 +112,23 @@ describe('templateSrv', () => {
       expect(target).toBe('this.{value1,value2}.filters');
     });
 
+    describe('when the globbed variable only has one value', () => {
+      beforeEach(() => {
+        initTemplateSrv([
+          {
+            type: 'query',
+            name: 'test',
+            current: { value: ['value1'] },
+          },
+        ]);
+      });
+
+      it('should not glob the value', () => {
+        const target = _templateSrv.replace('this.$test.filters', {}, 'glob');
+        expect(target).toBe('this.value1.filters');
+      });
+    });
+
     it('should replace ${test} with globbed value', () => {
       const target = _templateSrv.replace('this.${test}.filters', {}, 'glob');
       expect(target).toBe('this.{value1,value2}.filters');
@@ -499,6 +516,11 @@ describe('templateSrv', () => {
   describe('built in interval variables', () => {
     beforeEach(() => {
       initTemplateSrv([]);
+    });
+
+    it('should be possible to fetch value with getBuilInIntervalValue', () => {
+      const val = _templateSrv.getBuiltInIntervalValue();
+      expect(val).toBe('1s');
     });
 
     it('should replace $__interval_ms with interval milliseconds', () => {
