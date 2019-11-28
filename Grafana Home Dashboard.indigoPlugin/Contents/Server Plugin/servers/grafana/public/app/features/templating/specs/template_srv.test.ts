@@ -1,9 +1,9 @@
 import { TemplateSrv } from '../template_srv';
 
 describe('templateSrv', () => {
-  let _templateSrv;
+  let _templateSrv: any;
 
-  function initTemplateSrv(variables) {
+  function initTemplateSrv(variables: any) {
     _templateSrv = new TemplateSrv();
     _templateSrv.init(variables);
   }
@@ -22,6 +22,27 @@ describe('templateSrv', () => {
   describe('replace can pass scoped vars', () => {
     beforeEach(() => {
       initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
+    });
+
+    it('scoped vars should support objects', () => {
+      const target = _templateSrv.replace('${series.name} ${series.nested.field}', {
+        series: { value: { name: 'Server1', nested: { field: 'nested' } } },
+      });
+      expect(target).toBe('Server1 nested');
+    });
+
+    it('scoped vars should support objects with propert names with dot', () => {
+      const target = _templateSrv.replace('${series.name} ${series.nested["field.with.dot"]}', {
+        series: { value: { name: 'Server1', nested: { 'field.with.dot': 'nested' } } },
+      });
+      expect(target).toBe('Server1 nested');
+    });
+
+    it('scoped vars should support arrays of objects', () => {
+      const target = _templateSrv.replace('${series.rows[0].name} ${series.rows[1].name}', {
+        series: { value: { rows: [{ name: 'first' }, { name: 'second' }] } },
+      });
+      expect(target).toBe('first second');
     });
 
     it('should replace $test with scoped value', () => {
@@ -247,6 +268,14 @@ describe('templateSrv', () => {
     });
   });
 
+  describe('html format', () => {
+    it('should encode values html escape sequences', () => {
+      initTemplateSrv([{ type: 'query', name: 'test', current: { value: '<script>alert(asd)</script>' } }]);
+      const target = _templateSrv.replace('$test', {}, 'html');
+      expect(target).toBe('&lt;script&gt;alert(asd)&lt;/script&gt;');
+    });
+  });
+
   describe('format variable to string values', () => {
     it('single value should return value', () => {
       const result = _templateSrv.formatValue('test');
@@ -391,7 +420,7 @@ describe('templateSrv', () => {
     });
 
     it('should set multiple url params', () => {
-      const params = {};
+      const params: any = {};
       _templateSrv.fillVariableValuesForUrl(params);
       expect(params['var-test']).toMatchObject(['val1', 'val2']);
     });
@@ -412,7 +441,7 @@ describe('templateSrv', () => {
     });
 
     it('should not include template variable value in url', () => {
-      const params = {};
+      const params: any = {};
       _templateSrv.fillVariableValuesForUrl(params);
       expect(params['var-test']).toBe(undefined);
     });
@@ -434,7 +463,7 @@ describe('templateSrv', () => {
     });
 
     it('should not include template variable value in url', () => {
-      const params = {};
+      const params: any = {};
       _templateSrv.fillVariableValuesForUrl(params);
       expect(params['var-test']).toBe(undefined);
     });
@@ -446,7 +475,7 @@ describe('templateSrv', () => {
     });
 
     it('should set scoped value as url params', () => {
-      const params = {};
+      const params: any = {};
       _templateSrv.fillVariableValuesForUrl(params, {
         test: { value: 'val1' },
       });
@@ -460,7 +489,7 @@ describe('templateSrv', () => {
     });
 
     it('should not set scoped value as url params', () => {
-      const params = {};
+      const params: any = {};
       _templateSrv.fillVariableValuesForUrl(params, {
         test: { name: 'test', value: 'val1', skipUrlSync: true },
       });

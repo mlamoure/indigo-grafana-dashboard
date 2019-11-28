@@ -12,10 +12,19 @@ type GraphContextMenuProps = ContextMenuProps & {
 export const GraphContextMenu: React.FC<GraphContextMenuProps> = ({
   getContextMenuSource,
   formatSourceDate,
+  items,
   ...otherProps
 }) => {
   const theme = useContext(ThemeContext);
   const source = getContextMenuSource();
+
+  //  Do not render items that do not have label specified
+  const itemsToRender = items
+    ? items.map(group => ({
+        ...group,
+        items: group.items.filter(item => item.label),
+      }))
+    : [];
 
   const renderHeader = source
     ? () => {
@@ -49,5 +58,5 @@ export const GraphContextMenu: React.FC<GraphContextMenuProps> = ({
       }
     : null;
 
-  return <ContextMenu {...otherProps} renderHeader={renderHeader} />;
+  return <ContextMenu {...otherProps} items={itemsToRender} renderHeader={renderHeader} />;
 };
