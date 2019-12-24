@@ -1,12 +1,12 @@
 import React, { PureComponent, ChangeEvent } from 'react';
-import { SelectableValue, QueryEditorProps } from '@grafana/data';
+import { SelectableValue, ExploreQueryFieldProps } from '@grafana/data';
 import { Input, Segment, SegmentAsync, ValidationEvents, EventsWithValidation, Switch } from '@grafana/ui';
 import { CloudWatchQuery } from '../types';
 import CloudWatchDatasource from '../datasource';
 import { SelectableStrings } from '../types';
 import { Stats, Dimensions, QueryInlineField, QueryField, Alias } from './';
 
-export type Props = QueryEditorProps<CloudWatchDatasource, CloudWatchQuery>;
+export type Props = ExploreQueryFieldProps<CloudWatchDatasource, CloudWatchQuery>;
 
 interface State {
   regions: SelectableStrings;
@@ -159,6 +159,7 @@ export class QueryEditor extends PureComponent<Props, State> {
                   const { [newKey]: value, ...newDimensions } = query.dimensions;
                   return datasource
                     .getDimensionValues(query.region, query.namespace, query.metricName, newKey, newDimensions)
+                    .then(values => (values.length ? [{ value: '*', text: '*', label: '*' }, ...values] : values))
                     .then(this.appendTemplateVariables);
                 }}
               />
