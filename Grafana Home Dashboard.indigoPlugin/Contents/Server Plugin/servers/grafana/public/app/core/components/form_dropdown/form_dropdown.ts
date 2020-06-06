@@ -1,6 +1,7 @@
 import _ from 'lodash';
 import coreModule from '../../core_module';
-import { ISCEService, IQService } from 'angular';
+import { ISCEService } from 'angular';
+import { promiseToDigest } from 'app/core/utils/promiseToDigest';
 
 function typeaheadMatcher(this: any, item: string) {
   let str = this.query;
@@ -38,13 +39,7 @@ export class FormDropdownCtrl {
   debounce: number;
 
   /** @ngInject */
-  constructor(
-    private $scope: any,
-    $element: JQLite,
-    private $sce: ISCEService,
-    private templateSrv: any,
-    private $q: IQService
-  ) {
+  constructor(private $scope: any, $element: JQLite, private $sce: ISCEService, private templateSrv: any) {
     this.inputElement = $element.find('input').first();
     this.linkElement = $element.find('a').first();
     this.linkMode = true;
@@ -107,11 +102,7 @@ export class FormDropdownCtrl {
   }
 
   getOptionsInternal(query: string) {
-    const result = this.getOptions({ $query: query });
-    if (this.isPromiseLike(result)) {
-      return result;
-    }
-    return this.$q.when(result);
+    return promiseToDigest(this.$scope)(Promise.resolve(this.getOptions({ $query: query })));
   }
 
   isPromiseLike(obj: any) {

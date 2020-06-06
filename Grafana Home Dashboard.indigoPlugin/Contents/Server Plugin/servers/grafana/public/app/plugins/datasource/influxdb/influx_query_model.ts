@@ -24,8 +24,16 @@ export default class InfluxQueryModel {
     target.resultFormat = target.resultFormat || 'time_series';
     target.orderByTime = target.orderByTime || 'ASC';
     target.tags = target.tags || [];
-    target.groupBy = target.groupBy || [{ type: 'time', params: ['$__interval'] }, { type: 'fill', params: ['null'] }];
-    target.select = target.select || [[{ type: 'field', params: ['value'] }, { type: 'mean', params: [] }]];
+    target.groupBy = target.groupBy || [
+      { type: 'time', params: ['$__interval'] },
+      { type: 'fill', params: ['null'] },
+    ];
+    target.select = target.select || [
+      [
+        { type: 'field', params: ['value'] },
+        { type: 'mean', params: [] },
+      ],
+    ];
 
     this.updateProjection();
   }
@@ -54,7 +62,12 @@ export default class InfluxQueryModel {
   }
 
   addGroupBy(value: string) {
-    const stringParts = value.match(/^(\w+)\((.*)\)$/);
+    let stringParts = value.match(/^(\w+)\((.*)\)$/);
+
+    if (!stringParts || !this.target.groupBy) {
+      return;
+    }
+
     const typePart = stringParts[1];
     const arg = stringParts[2];
     const partModel = queryPart.create({ type: typePart, params: [arg] });

@@ -1,6 +1,7 @@
 import React, { ChangeEvent, PureComponent } from 'react';
 import { SelectableValue } from '@grafana/data';
-import { Input, FormLabel, Select, Button } from '@grafana/ui';
+import { InlineFormLabel, LegacyForms, Button } from '@grafana/ui';
+const { Select, Input } = LegacyForms;
 
 export interface Props {
   selectedAzureCloud?: string;
@@ -13,58 +14,22 @@ export interface Props {
   subscriptionOptions?: SelectableValue[];
   onAzureCloudChange?: (value: SelectableValue<string>) => void;
   onSubscriptionSelectChange?: (value: SelectableValue<string>) => void;
-  onTenantIdChange: (tenantId: string) => void;
-  onClientIdChange: (clientId: string) => void;
-  onClientSecretChange: (clientSecret: string) => void;
+  onTenantIdChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onClientIdChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onClientSecretChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onResetClientSecret: () => void;
   onLoadSubscriptions?: () => void;
 }
 
-export interface State {
-  selectedAzureCloud?: string;
-  selectedSubscription: string;
-  tenantId: string;
-  clientId: string;
-  clientSecret: string;
-  clientSecretConfigured: boolean;
-}
-
-export class AzureCredentialsForm extends PureComponent<Props, State> {
-  constructor(props: Props) {
-    super(props);
-
-    const {
-      selectedAzureCloud,
-      selectedSubscription,
-      tenantId,
-      clientId,
-      clientSecret,
-      clientSecretConfigured,
-    } = this.props;
-
-    this.state = {
-      selectedAzureCloud,
-      selectedSubscription,
-      tenantId,
-      clientId,
-      clientSecret,
-      clientSecretConfigured,
-    };
-  }
-
-  static getDerivedStateFromProps(nextProps: Props, prevState: Props) {
-    const { selectedAzureCloud, tenantId, clientId, clientSecret, clientSecretConfigured } = nextProps;
-    return {
-      selectedAzureCloud,
-      tenantId,
-      clientId,
-      clientSecret,
-      clientSecretConfigured,
-    };
-  }
-
+export class AzureCredentialsForm extends PureComponent<Props> {
   render() {
     const {
+      selectedAzureCloud,
+      selectedSubscription,
+      tenantId,
+      clientId,
+      clientSecret,
+      clientSecretConfigured,
       azureCloudOptions,
       subscriptionOptions,
       onAzureCloudChange,
@@ -75,25 +40,18 @@ export class AzureCredentialsForm extends PureComponent<Props, State> {
       onResetClientSecret,
       onLoadSubscriptions,
     } = this.props;
-    const {
-      selectedAzureCloud,
-      selectedSubscription,
-      tenantId,
-      clientId,
-      clientSecret,
-      clientSecretConfigured,
-    } = this.state;
     const hasRequiredFields = tenantId && clientId && (clientSecret || clientSecretConfigured);
     const hasSubscriptions = onLoadSubscriptions && subscriptionOptions;
+
     return (
       <>
         <div className="gf-form-group">
           {azureCloudOptions && (
             <div className="gf-form-inline">
               <div className="gf-form">
-                <FormLabel className="width-12" tooltip="Choose an Azure Cloud.">
+                <InlineFormLabel className="width-12" tooltip="Choose an Azure Cloud.">
                   Azure Cloud
-                </FormLabel>
+                </InlineFormLabel>
                 <Select
                   className="width-15"
                   value={azureCloudOptions.find(azureCloud => azureCloud.value === selectedAzureCloud)}
@@ -106,26 +64,26 @@ export class AzureCredentialsForm extends PureComponent<Props, State> {
           )}
           <div className="gf-form-inline">
             <div className="gf-form">
-              <FormLabel className="width-12">Directory (tenant) ID</FormLabel>
+              <InlineFormLabel className="width-12">Directory (tenant) ID</InlineFormLabel>
               <div className="width-15">
                 <Input
                   className="width-30"
                   placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
                   value={tenantId || ''}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => onTenantIdChange(event.target.value)}
+                  onChange={onTenantIdChange}
                 />
               </div>
             </div>
           </div>
           <div className="gf-form-inline">
             <div className="gf-form">
-              <FormLabel className="width-12">Application (client) ID</FormLabel>
+              <InlineFormLabel className="width-12">Application (client) ID</InlineFormLabel>
               <div className="width-15">
                 <Input
                   className="width-30"
                   placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
                   value={clientId || ''}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => onClientIdChange(event.target.value)}
+                  onChange={onClientIdChange}
                 />
               </div>
             </div>
@@ -133,7 +91,7 @@ export class AzureCredentialsForm extends PureComponent<Props, State> {
           {clientSecretConfigured ? (
             <div className="gf-form-inline">
               <div className="gf-form">
-                <FormLabel className="width-12">Client Secret</FormLabel>
+                <InlineFormLabel className="width-12">Client Secret</InlineFormLabel>
                 <Input className="width-25" placeholder="configured" disabled={true} />
               </div>
               <div className="gf-form">
@@ -147,13 +105,13 @@ export class AzureCredentialsForm extends PureComponent<Props, State> {
           ) : (
             <div className="gf-form-inline">
               <div className="gf-form">
-                <FormLabel className="width-12">Client Secret</FormLabel>
+                <InlineFormLabel className="width-12">Client Secret</InlineFormLabel>
                 <div className="width-15">
                   <Input
                     className="width-30"
                     placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
                     value={clientSecret || ''}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => onClientSecretChange(event.target.value)}
+                    onChange={onClientSecretChange}
                   />
                 </div>
               </div>
@@ -163,7 +121,7 @@ export class AzureCredentialsForm extends PureComponent<Props, State> {
             <>
               <div className="gf-form-inline">
                 <div className="gf-form">
-                  <FormLabel className="width-12">Default Subscription</FormLabel>
+                  <InlineFormLabel className="width-12">Default Subscription</InlineFormLabel>
                   <div className="width-25">
                     <Select
                       value={subscriptionOptions.find(subscription => subscription.value === selectedSubscription)}

@@ -2,16 +2,20 @@
 import React, { PureComponent } from 'react';
 
 // Components
-import { Select, FormLabel, PanelOptionsGroup } from '@grafana/ui';
+import { LegacyForms, InlineFormLabel, PanelOptionsGroup } from '@grafana/ui';
+const { Select, FormField } = LegacyForms;
 
 // Types
 import { PanelEditorProps } from '@grafana/data';
-import { FormField, PieChartType } from '@grafana/ui';
+import { PieChartType } from '@grafana/ui';
 import { PieChartOptions } from './types';
 
 const labelWidth = 8;
 
-const pieChartOptions = [{ value: PieChartType.PIE, label: 'Pie' }, { value: PieChartType.DONUT, label: 'Donut' }];
+const pieChartOptions = [
+  { value: PieChartType.PIE, label: 'Pie' },
+  { value: PieChartType.DONUT, label: 'Donut' },
+];
 
 export class PieChartOptionsBox extends PureComponent<PanelEditorProps<PieChartOptions>> {
   onPieTypeChange = (pieType: any) => this.props.onOptionsChange({ ...this.props.options, pieType: pieType.value });
@@ -25,7 +29,7 @@ export class PieChartOptionsBox extends PureComponent<PanelEditorProps<PieChartO
     return (
       <PanelOptionsGroup title="PieChart">
         <div className="gf-form">
-          <FormLabel width={labelWidth}>Type</FormLabel>
+          <InlineFormLabel width={labelWidth}>Type</InlineFormLabel>
           <Select
             width={12}
             options={pieChartOptions}

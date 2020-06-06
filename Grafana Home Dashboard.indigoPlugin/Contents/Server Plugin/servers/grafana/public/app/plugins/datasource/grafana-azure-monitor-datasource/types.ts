@@ -1,7 +1,8 @@
-import { DataQuery, DataSourceJsonData } from '@grafana/data';
+import { DataQuery, DataSourceJsonData, DataSourceSettings } from '@grafana/data';
+
+export type AzureDataSourceSettings = DataSourceSettings<AzureDataSourceJsonData, AzureDataSourceSecureJsonData>;
 
 export interface AzureMonitorQuery extends DataQuery {
-  refId: string;
   format: string;
   subscription: string;
   azureMonitor: AzureMetricQuery;
@@ -29,8 +30,9 @@ export interface AzureDataSourceJsonData extends DataSourceJsonData {
 }
 
 export interface AzureDataSourceSecureJsonData {
-  clientSecret: string;
-  logAnalyticsClientSecret: string;
+  clientSecret?: string;
+  logAnalyticsClientSecret?: string;
+  appInsightsApiKey?: string;
 }
 
 export interface AzureMetricQuery {

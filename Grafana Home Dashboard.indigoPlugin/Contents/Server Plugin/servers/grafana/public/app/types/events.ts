@@ -1,7 +1,5 @@
-import { DataFrame, TimeRange } from '@grafana/data';
-import { IHttpResponse } from 'angular';
+import { eventFactory, TimeRange } from '@grafana/data';
 import { DashboardModel } from 'app/features/dashboard/state';
-import { eventFactory } from '@grafana/data';
 
 /**
  * Event Payloads
@@ -24,6 +22,11 @@ export interface ShowModalPayload {
   scope?: any;
 }
 
+export interface ShowModalReactPayload {
+  component: React.ComponentType;
+  props?: any;
+}
+
 export interface ShowConfirmModalPayload {
   title?: string;
   text?: string;
@@ -39,7 +42,19 @@ export interface ShowConfirmModalPayload {
   onAltAction?: () => void;
 }
 
-type DataSourceResponsePayload = IHttpResponse<any>;
+export interface DataSourceResponse<T> {
+  data: T;
+  readonly status: number;
+  readonly statusText: string;
+  readonly ok: boolean;
+  readonly headers: Headers;
+  readonly redirected: boolean;
+  readonly type: ResponseType;
+  readonly url: string;
+  readonly config: any;
+}
+
+type DataSourceResponsePayload = DataSourceResponse<any>;
 
 export interface SaveDashboardPayload {
   overwrite?: boolean;
@@ -99,6 +114,7 @@ export const timepickerClosed = eventFactory('timepickerClosed');
 export const showModal = eventFactory<ShowModalPayload>('show-modal');
 export const showConfirmModal = eventFactory<ShowConfirmModalPayload>('confirm-modal');
 export const hideModal = eventFactory('hide-modal');
+export const showModalReact = eventFactory<ShowModalReactPayload>('show-modal-react');
 
 export const dsRequestResponse = eventFactory<DataSourceResponsePayload>('ds-request-response');
 export const dsRequestError = eventFactory<any>('ds-request-error');
@@ -121,8 +137,7 @@ export const repeatsProcessed = eventFactory('repeats-processed');
 export const rowExpanded = eventFactory('row-expanded');
 export const rowCollapsed = eventFactory('row-collapsed');
 export const templateVariableValueUpdated = eventFactory('template-variable-value-updated');
-
-export const dataFramesReceived = eventFactory<DataFrame[]>('data-frames-received');
+export const submenuVisibilityChanged = eventFactory<boolean>('submenu-visibility-changed');
 
 export const graphClicked = eventFactory<GraphClickedPayload>('graph-click');
 

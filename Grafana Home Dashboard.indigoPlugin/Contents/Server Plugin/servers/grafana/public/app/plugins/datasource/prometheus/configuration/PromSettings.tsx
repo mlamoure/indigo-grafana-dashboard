@@ -1,17 +1,22 @@
 import React, { SyntheticEvent } from 'react';
-import { EventsWithValidation, FormField, FormLabel, Input, regexValidation, Select } from '@grafana/ui';
-import { DataSourceSettings } from '@grafana/data';
+import { EventsWithValidation, InlineFormLabel, regexValidation, LegacyForms } from '@grafana/ui';
+const { Select, Input, FormField, Switch } = LegacyForms;
+import {
+  SelectableValue,
+  onUpdateDatasourceJsonDataOptionChecked,
+  DataSourcePluginOptionsEditorProps,
+} from '@grafana/data';
 import { PromOptions } from '../types';
 
-const httpOptions = [{ value: 'GET', label: 'GET' }, { value: 'POST', label: 'POST' }];
+const httpOptions = [
+  { value: 'GET', label: 'GET' },
+  { value: 'POST', label: 'POST' },
+];
 
-type Props = {
-  value: DataSourceSettings<PromOptions>;
-  onChange: (value: DataSourceSettings<PromOptions>) => void;
-};
+type Props = Pick<DataSourcePluginOptionsEditorProps<PromOptions>, 'options' | 'onOptionsChange'>;
 
 export const PromSettings = (props: Props) => {
-  const { value, onChange } = props;
+  const { options, onOptionsChange } = props;
 
   return (
     <>
@@ -21,25 +26,17 @@ export const PromSettings = (props: Props) => {
             <FormField
               label="Scrape interval"
               labelWidth={13}
-              placeholder="15s"
               inputEl={
                 <Input
                   className="width-6"
-                  value={value.jsonData.timeInterval}
+                  value={options.jsonData.timeInterval}
                   spellCheck={false}
-                  onChange={onChangeHandler('timeInterval', value, onChange)}
-                  validationEvents={{
-                    [EventsWithValidation.onBlur]: [
-                      regexValidation(
-                        /^\d+(ms|[Mwdhmsy])$/,
-                        'Value is not valid, you can use number with time unit specifier: y, M, w, d, h, m, s'
-                      ),
-                    ],
-                  }}
+                  placeholder="15s"
+                  onChange={onChangeHandler('timeInterval', options, onOptionsChange)}
+                  validationEvents={promSettingsValidationEvents}
                 />
               }
-              tooltip="Set this to your global scrape interval defined in your Prometheus config file. This will be used as a lower limit for the
-        Prometheus step query parameter."
+              tooltip="Set this to the typical scrape and evaluation interval configured in Prometheus. Defaults to 15s."
             />
           </div>
         </div>
@@ -51,18 +48,11 @@ export const PromSettings = (props: Props) => {
               inputEl={
                 <Input
                   className="width-6"
-                  value={value.jsonData.queryTimeout}
-                  onChange={onChangeHandler('queryTimeout', value, onChange)}
+                  value={options.jsonData.queryTimeout}
+                  onChange={onChangeHandler('queryTimeout', options, onOptionsChange)}
                   spellCheck={false}
                   placeholder="60s"
-                  validationEvents={{
-                    [EventsWithValidation.onBlur]: [
-                      regexValidation(
-                        /^\d+(ms|[Mwdhmsy])$/,
-                        'Value is not valid, you can use number with time unit specifier: y, M, w, d, h, m, s'
-                      ),
-                    ],
-                  }}
+                  validationEvents={promSettingsValidationEvents}
                 />
               }
               tooltip="Set the Prometheus query timeout."
@@ -70,22 +60,31 @@ export const PromSettings = (props: Props) => {
           </div>
         </div>
         <div className="gf-form">
-          <FormLabel
+          <InlineFormLabel
             width={13}
             tooltip="Specify the HTTP Method to query Prometheus. (POST is only available in Prometheus >= v2.1.0)"
           >
             HTTP Method
-          </FormLabel>
+          </InlineFormLabel>
           <Select
             options={httpOptions}
-            value={httpOptions.find(o => o.value === value.jsonData.httpMethod)}
-            onChange={onChangeHandler('httpMethod', value, onChange)}
+            value={httpOptions.find(o => o.value === options.jsonData.httpMethod)}
+            onChange={onChangeHandler('httpMethod', options, onOptionsChange)}
             width={7}
           />
         </div>
       </div>
       <h3 className="page-heading">Misc</h3>
       <div className="gf-form-group">
+        <div className="gf-form">
+          <Switch
+            checked={options.jsonData.disableMetricsLookup}
+            label="Disable metrics lookup"
+            labelClass="width-14"
+            onChange={onUpdateDatasourceJsonDataOptionChecked(props, 'disableMetricsLookup')}
+            tooltip="Checking this option will disable the metrics chooser and metric/label support in the query field's autocomplete. This helps if you have performance issues with bigger Prometheus instances."
+          />
+        </div>
         <div className="gf-form-inline">
           <div className="gf-form max-width-30">
             <FormField
@@ -95,8 +94,8 @@ export const PromSettings = (props: Props) => {
               inputEl={
                 <Input
                   className="width-25"
-                  value={value.jsonData.customQueryParameters}
-                  onChange={onChangeHandler('customQueryParameters', value, onChange)}
+                  value={options.jsonData.customQueryParameters}
+                  onChange={onChangeHandler('customQueryParameters', options, onOptionsChange)}
                   spellCheck={false}
                   placeholder="Example: max_source_resolution=5m&timeout=10"
                 />
@@ -109,14 +108,37 @@ export const PromSettings = (props: Props) => {
   );
 };
 
-const onChangeHandler = (key: keyof PromOptions, value: Props['value'], onChange: Props['onChange']) => (
-  event: SyntheticEvent<HTMLInputElement | HTMLSelectElement>
-) => {
-  onChange({
-    ...value,
+export const promSettingsValidationEvents = {
+  [EventsWithValidation.onBlur]: [
+    regexValidation(
+      /^$|^\d+(ms|[Mwdhmsy])$/,
+      'Value is not valid, you can use number with time unit specifier: y, M, w, d, h, m, s'
+    ),
+  ],
+};
+
+export const getValueFromEventItem = (eventItem: SyntheticEvent<HTMLInputElement> | SelectableValue<string>) => {
+  if (!eventItem) {
+    return '';
+  }
+
+  if (eventItem.hasOwnProperty('currentTarget')) {
+    return eventItem.currentTarget.value;
+  }
+
+  return (eventItem as SelectableValue<string>).value;
+};
+
+const onChangeHandler = (
+  key: keyof PromOptions,
+  options: Props['options'],
+  onOptionsChange: Props['onOptionsChange']
+) => (eventItem: SyntheticEvent<HTMLInputElement> | SelectableValue<string>) => {
+  onOptionsChange({
+    ...options,
     jsonData: {
-      ...value.jsonData,
-      [key]: event.currentTarget.value,
+      ...options.jsonData,
+      [key]: getValueFromEventItem(eventItem),
     },
   });
 };

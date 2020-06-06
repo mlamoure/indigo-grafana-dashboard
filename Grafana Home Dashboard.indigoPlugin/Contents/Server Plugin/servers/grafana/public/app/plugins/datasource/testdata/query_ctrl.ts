@@ -1,9 +1,12 @@
 import _ from 'lodash';
+import { IScope } from 'angular';
+import { getBackendSrv } from '@grafana/runtime';
+import { dateMath, dateTime } from '@grafana/data';
+import { selectors } from '@grafana/e2e-selectors';
 
 import { QueryCtrl } from 'app/plugins/sdk';
 import { defaultQuery } from './runStreams';
-import { getBackendSrv } from 'app/core/services/backend_srv';
-import { dateTime, dateMath } from '@grafana/data';
+import { promiseToDigest } from 'app/core/utils/promiseToDigest';
 
 export const defaultPulse: any = {
   timeStep: 60,
@@ -28,11 +31,13 @@ export class TestDataQueryCtrl extends QueryCtrl {
   newPointValue: number;
   newPointTime: any;
   selectedPoint: any;
+  digest: (promise: Promise<any>) => Promise<any>;
 
   showLabels = false;
+  selectors: typeof selectors.components.DataSource.TestData.QueryTab;
 
   /** @ngInject */
-  constructor($scope: any, $injector: any) {
+  constructor($scope: IScope, $injector: any) {
     super($scope, $injector);
 
     this.target.scenarioId = this.target.scenarioId || 'random_walk';
@@ -40,6 +45,7 @@ export class TestDataQueryCtrl extends QueryCtrl {
     this.newPointTime = dateTime();
     this.selectedPoint = { text: 'Select point', value: null };
     this.showLabels = showLabelsFor.includes(this.target.scenarioId);
+    this.selectors = selectors.components.DataSource.TestData.QueryTab;
   }
 
   getPoints() {
@@ -70,18 +76,18 @@ export class TestDataQueryCtrl extends QueryCtrl {
   }
 
   $onInit() {
-    return getBackendSrv()
-      .get('/api/tsdb/testdata/scenarios')
-      .then((res: any) => {
-        this.scenarioList = res;
-        this.scenario = _.find(this.scenarioList, { id: this.target.scenarioId });
-      });
+    return promiseToDigest(this.$scope)(
+      getBackendSrv()
+        .get('/api/tsdb/testdata/scenarios')
+        .then((res: any) => {
+          this.scenarioList = res;
+          this.scenario = _.find(this.scenarioList, { id: this.target.scenarioId });
+        })
+    );
   }
 
   scenarioChanged() {
     this.scenario = _.find(this.scenarioList, { id: this.target.scenarioId });
-    this.target.stringInput = this.scenario.stringInput;
-    this.showLabels = showLabelsFor.includes(this.target.scenarioId);
 
     if (this.target.scenarioId === 'manual_entry') {
       this.target.points = this.target.points || [];
@@ -106,6 +112,15 @@ export class TestDataQueryCtrl extends QueryCtrl {
     } else {
       delete this.target.csvWave;
     }
+
+    if (this.target.scenarioId === 'grafana_api') {
+      this.target.stringInput = 'datasources';
+    } else {
+      delete this.target.stringInput;
+    }
+
+    this.target.stringInput = this.scenario.stringInput ?? undefined;
+    this.showLabels = showLabelsFor.includes(this.target.scenarioId);
 
     this.refresh();
   }

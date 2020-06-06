@@ -1,4 +1,4 @@
-import angular, { IQService } from 'angular';
+import angular from 'angular';
 import coreModule from 'app/core/core_module';
 import _ from 'lodash';
 import { TemplateSrv } from 'app/features/templating/template_srv';
@@ -6,7 +6,7 @@ import DatasourceSrv from 'app/features/plugins/datasource_srv';
 
 export class CloudWatchQueryParameterCtrl {
   /** @ngInject */
-  constructor($scope: any, templateSrv: TemplateSrv, uiSegmentSrv: any, datasourceSrv: DatasourceSrv, $q: IQService) {
+  constructor($scope: any, templateSrv: TemplateSrv, uiSegmentSrv: any, datasourceSrv: DatasourceSrv) {
     $scope.init = () => {
       const target = $scope.target;
       target.namespace = target.namespace || '';
@@ -30,7 +30,7 @@ export class CloudWatchQueryParameterCtrl {
           memo.push(uiSegmentSrv.newKeyValue(value));
           return memo;
         },
-        []
+        [] as any
       );
 
       $scope.statSegments = _.map($scope.target.statistics, stat => {
@@ -58,7 +58,7 @@ export class CloudWatchQueryParameterCtrl {
     };
 
     $scope.getStatSegments = () => {
-      return $q.when(
+      return Promise.resolve(
         _.flatten([
           angular.copy($scope.removeStatSegment),
           _.map($scope.datasource.standardStatistics, s => {
@@ -84,7 +84,7 @@ export class CloudWatchQueryParameterCtrl {
           }
           return memo;
         },
-        []
+        [] as any
       );
 
       $scope.ensurePlusButton($scope.statSegments);
@@ -102,11 +102,11 @@ export class CloudWatchQueryParameterCtrl {
 
     $scope.getDimSegments = (segment: any, $index: number) => {
       if (segment.type === 'operator') {
-        return $q.when([]);
+        return Promise.resolve([]);
       }
 
       const target = $scope.target;
-      let query = $q.when([]);
+      let query = Promise.resolve([] as any[]);
 
       if (segment.type === 'key' || segment.type === 'plus-button') {
         query = $scope.datasource.getDimensionKeys($scope.target.namespace, $scope.target.region);
@@ -207,7 +207,7 @@ export class CloudWatchQueryParameterCtrl {
         });
 
         if (addTemplateVars) {
-          _.each(templateSrv.variables, variable => {
+          _.each(templateSrv.getVariables(), variable => {
             segments.unshift(
               uiSegmentSrv.newSegment({
                 type: 'template',

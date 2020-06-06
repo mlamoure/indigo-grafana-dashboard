@@ -5,10 +5,11 @@ import filter from 'lodash/filter';
 import find from 'lodash/find';
 import indexOf from 'lodash/indexOf';
 import map from 'lodash/map';
+import { selectors } from '@grafana/e2e-selectors';
 
 import coreModule from '../core_module';
 import { GrafanaRootScope } from 'app/routes/GrafanaCtrl';
-import { containsSearchFilter } from '../../features/templating/variable';
+import { containsSearchFilter } from '../../features/templating/utils';
 
 export class ValueSelectDropdownCtrl {
   dropdownVisible: any;
@@ -26,11 +27,13 @@ export class ValueSelectDropdownCtrl {
   onUpdated: any;
   queryHasSearchFilter: boolean;
   debouncedQueryChanged: Function;
+  selectors: typeof selectors.pages.Dashboard.SubMenu;
 
   /** @ngInject */
-  constructor(private $q: any, private $scope: IScope) {
+  constructor(private $scope: IScope) {
     this.queryHasSearchFilter = this.variable ? containsSearchFilter(this.variable.query) : false;
     this.debouncedQueryChanged = debounce(this.queryChanged.bind(this), 200);
+    this.selectors = selectors.pages.Dashboard.SubMenu;
   }
 
   show() {
@@ -114,7 +117,7 @@ export class ValueSelectDropdownCtrl {
     if (!tag.values) {
       tagValuesPromise = this.variable.getValuesForTag(tag.text);
     } else {
-      tagValuesPromise = this.$q.when(tag.values);
+      tagValuesPromise = Promise.resolve(tag.values);
     }
 
     return tagValuesPromise.then((values: any) => {

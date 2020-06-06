@@ -27,7 +27,7 @@ export class AnnotationsEditorCtrl {
 
   emptyListCta = {
     title: 'There are no custom annotation queries added yet',
-    buttonIcon: 'gicon gicon-annotation',
+    buttonIcon: 'comment-alt',
     buttonTitle: 'Add Annotation Query',
     infoBox: {
       __html: `<p>Annotations provide a way to integrate event data into your graphs. They are visualized as vertical lines
@@ -44,7 +44,10 @@ export class AnnotationsEditorCtrl {
     infoBoxTitle: 'What are annotations?',
   };
 
-  showOptions: any = [{ text: 'All Panels', value: 0 }, { text: 'Specific Panels', value: 1 }];
+  showOptions: any = [
+    { text: 'All Panels', value: 0 },
+    { text: 'Specific Panels', value: 1 },
+  ];
 
   /** @ngInject */
   constructor(private $scope: any, private datasourceSrv: DatasourceSrv) {

@@ -5,10 +5,11 @@ import { QueryCtrl } from 'app/plugins/sdk';
 import { SqlPart } from 'app/core/components/sql_part/sql_part';
 import MysqlQuery from './mysql_query';
 import sqlPart from './sql_part';
-import { auto, IQService } from 'angular';
+import { auto } from 'angular';
 import { TemplateSrv } from 'app/features/templating/template_srv';
 import { CoreEvents } from 'app/types';
 import { PanelEvents } from '@grafana/data';
+import { VariableWithMultiSupport } from 'app/features/templating/types';
 
 export interface QueryMeta {
   sql: string;
@@ -49,7 +50,6 @@ export class MysqlQueryCtrl extends QueryCtrl {
     $scope: any,
     $injector: auto.IInjectorService,
     private templateSrv: TemplateSrv,
-    private $q: IQService,
     private uiSegmentSrv: any
   ) {
     super($scope, $injector);
@@ -59,7 +59,10 @@ export class MysqlQueryCtrl extends QueryCtrl {
     this.metaBuilder = new MysqlMetaQuery(this.target, this.queryModel);
     this.updateProjection();
 
-    this.formats = [{ text: 'Time series', value: 'time_series' }, { text: 'Table', value: 'table' }];
+    this.formats = [
+      { text: 'Time series', value: 'time_series' },
+      { text: 'Table', value: 'table' },
+    ];
 
     if (!this.target.rawSql) {
       // special handling when in table panel
@@ -163,7 +166,7 @@ export class MysqlQueryCtrl extends QueryCtrl {
       appEvents.emit(CoreEvents.showConfirmModal, {
         title: 'Warning',
         text2: 'Switching to query builder may overwrite your raw SQL.',
-        icon: 'fa-exclamation',
+        icon: 'exclamation-triangle',
         yesText: 'Switch',
         onConfirm: () => {
           this.target.rawQuery = !this.target.rawQuery;
@@ -214,7 +217,7 @@ export class MysqlQueryCtrl extends QueryCtrl {
       }
     });
 
-    this.$q.all([task1, task2]).then(() => {
+    Promise.all([task1, task2]).then(() => {
       this.updateRawSqlAndRefresh();
     });
   }
@@ -299,10 +302,10 @@ export class MysqlQueryCtrl extends QueryCtrl {
       });
 
       if (config.addTemplateVars) {
-        for (const variable of this.templateSrv.variables) {
+        for (const variable of this.templateSrv.getVariables()) {
           let value;
           value = '$' + variable.name;
-          if (config.templateQuoter && variable.multi === false) {
+          if (config.templateQuoter && ((variable as unknown) as VariableWithMultiSupport).multi === false) {
             value = config.templateQuoter(value);
           }
 
@@ -446,7 +449,7 @@ export class MysqlQueryCtrl extends QueryCtrl {
         break;
       }
       case 'get-part-actions': {
-        return this.$q.when([{ text: 'Remove', value: 'remove-part' }]);
+        return Promise.resolve([{ text: 'Remove', value: 'remove-part' }]);
       }
     }
   }
@@ -470,7 +473,7 @@ export class MysqlQueryCtrl extends QueryCtrl {
         break;
       }
       case 'get-part-actions': {
-        return this.$q.when([{ text: 'Remove', value: 'remove-part' }]);
+        return Promise.resolve([{ text: 'Remove', value: 'remove-part' }]);
       }
     }
   }
@@ -533,7 +536,7 @@ export class MysqlQueryCtrl extends QueryCtrl {
           case 'right':
             if (['int', 'bigint', 'double', 'datetime'].indexOf(part.datatype) > -1) {
               // don't do value lookups for numerical fields
-              return this.$q.when([]);
+              return Promise.resolve([]);
             } else {
               return this.datasource
                 .metricFindQuery(this.metaBuilder.buildValueQuery(part.params[0]))
@@ -548,9 +551,9 @@ export class MysqlQueryCtrl extends QueryCtrl {
                 .catch(this.handleQueryError.bind(this));
             }
           case 'op':
-            return this.$q.when(this.uiSegmentSrv.newOperators(this.metaBuilder.getOperators(part.datatype)));
+            return Promise.resolve(this.uiSegmentSrv.newOperators(this.metaBuilder.getOperators(part.datatype)));
           default:
-            return this.$q.when([]);
+            return Promise.resolve([]);
         }
       }
       case 'part-param-changed': {
@@ -571,7 +574,7 @@ export class MysqlQueryCtrl extends QueryCtrl {
         break;
       }
       case 'get-part-actions': {
-        return this.$q.when([{ text: 'Remove', value: 'remove-part' }]);
+        return Promise.resolve([{ text: 'Remove', value: 'remove-part' }]);
       }
     }
   }
@@ -584,7 +587,7 @@ export class MysqlQueryCtrl extends QueryCtrl {
       options.push(this.uiSegmentSrv.newSegment({ type: 'macro', value: '$__timeFilter' }));
     }
     options.push(this.uiSegmentSrv.newSegment({ type: 'expression', value: 'Expression' }));
-    return this.$q.when(options);
+    return Promise.resolve(options);
   }
 
   addWhereAction(part: any, index: number) {

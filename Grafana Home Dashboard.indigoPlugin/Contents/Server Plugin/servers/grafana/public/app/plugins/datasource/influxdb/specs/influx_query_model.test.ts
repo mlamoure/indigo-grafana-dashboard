@@ -111,7 +111,10 @@ describe('InfluxQuery', () => {
           refId: 'A',
           measurement: 'cpu',
           groupBy: [{ type: 'time', params: ['auto'] }],
-          tags: [{ key: 'hostname', value: 'server1' }, { key: 'app', value: 'email', condition: 'AND' }],
+          tags: [
+            { key: 'hostname', value: 'server1' },
+            { key: 'app', value: 'email', condition: 'AND' },
+          ],
         },
         templateSrv,
         {}
@@ -132,7 +135,10 @@ describe('InfluxQuery', () => {
           refId: 'A',
           measurement: 'cpu',
           groupBy: [{ type: 'time', params: ['auto'] }],
-          tags: [{ key: 'hostname', value: 'server1' }, { key: 'hostname', value: 'server2', condition: 'OR' }],
+          tags: [
+            { key: 'hostname', value: 'server1' },
+            { key: 'hostname', value: 'server2', condition: 'OR' },
+          ],
         },
         templateSrv,
         {}
@@ -153,7 +159,10 @@ describe('InfluxQuery', () => {
           refId: 'A',
           measurement: 'cpu',
           groupBy: [{ type: 'time', params: ['auto'] }],
-          tags: [{ key: 'name', value: "Let's encrypt." }, { key: 'hostname', value: 'server2', condition: 'OR' }],
+          tags: [
+            { key: 'name', value: "Let's encrypt." },
+            { key: 'hostname', value: 'server2', condition: 'OR' },
+          ],
         },
         templateSrv,
         {}
@@ -192,7 +201,10 @@ describe('InfluxQuery', () => {
           refId: 'A',
           measurement: 'cpu',
           tags: [],
-          groupBy: [{ type: 'time', interval: 'auto' }, { type: 'tag', params: ['host'] }],
+          groupBy: [
+            { type: 'time', interval: 'auto' },
+            { type: 'tag', params: ['host'] },
+          ],
         },
         templateSrv,
         {}
@@ -250,10 +262,10 @@ describe('InfluxQuery', () => {
       );
 
       query.addGroupBy('tag(host)');
-      expect(query.target.groupBy.length).toBe(3);
-      expect(query.target.groupBy[1].type).toBe('tag');
-      expect(query.target.groupBy[1].params[0]).toBe('host');
-      expect(query.target.groupBy[2].type).toBe('fill');
+      expect(query.target.groupBy?.length).toBe(3);
+      expect(query.target.groupBy![1].type).toBe('tag');
+      expect(query.target.groupBy![1].params![0]).toBe('host');
+      expect(query.target.groupBy![2].type).toBe('fill');
     });
 
     it('should add tag last if no fill', () => {
@@ -268,8 +280,8 @@ describe('InfluxQuery', () => {
       );
 
       query.addGroupBy('tag(host)');
-      expect(query.target.groupBy.length).toBe(1);
-      expect(query.target.groupBy[0].type).toBe('tag');
+      expect(query.target.groupBy?.length).toBe(1);
+      expect(query.target.groupBy![0].type).toBe('tag');
     });
   });
 
@@ -286,8 +298,8 @@ describe('InfluxQuery', () => {
       );
 
       query.addSelectPart(query.selectModels[0], 'mean');
-      expect(query.target.select[0].length).toBe(2);
-      expect(query.target.select[0][1].type).toBe('mean');
+      expect(query.target.select![0].length).toBe(2);
+      expect(query.target.select![0][1].type).toBe('mean');
     });
 
     it('should replace sum by mean', () => {
@@ -302,8 +314,8 @@ describe('InfluxQuery', () => {
       );
 
       query.addSelectPart(query.selectModels[0], 'sum');
-      expect(query.target.select[0].length).toBe(2);
-      expect(query.target.select[0][1].type).toBe('sum');
+      expect(query.target.select![0].length).toBe(2);
+      expect(query.target.select![0][1].type).toBe('sum');
     });
 
     it('should add math before alias', () => {
@@ -318,8 +330,8 @@ describe('InfluxQuery', () => {
       );
 
       query.addSelectPart(query.selectModels[0], 'math');
-      expect(query.target.select[0].length).toBe(4);
-      expect(query.target.select[0][2].type).toBe('math');
+      expect(query.target.select![0].length).toBe(4);
+      expect(query.target.select![0][2].type).toBe('math');
     });
 
     it('should add math last', () => {
@@ -334,8 +346,8 @@ describe('InfluxQuery', () => {
       );
 
       query.addSelectPart(query.selectModels[0], 'math');
-      expect(query.target.select[0].length).toBe(3);
-      expect(query.target.select[0][2].type).toBe('math');
+      expect(query.target.select![0].length).toBe(3);
+      expect(query.target.select![0][2].type).toBe('math');
     });
 
     it('should replace math', () => {
@@ -350,8 +362,8 @@ describe('InfluxQuery', () => {
       );
 
       query.addSelectPart(query.selectModels[0], 'math');
-      expect(query.target.select[0].length).toBe(3);
-      expect(query.target.select[0][2].type).toBe('math');
+      expect(query.target.select![0].length).toBe(3);
+      expect(query.target.select![0][2].type).toBe('math');
     });
 
     it('should add math when one only query part', () => {
@@ -366,8 +378,8 @@ describe('InfluxQuery', () => {
       );
 
       query.addSelectPart(query.selectModels[0], 'math');
-      expect(query.target.select[0].length).toBe(2);
-      expect(query.target.select[0][1].type).toBe('math');
+      expect(query.target.select![0].length).toBe(2);
+      expect(query.target.select![0][1].type).toBe('math');
     });
 
     describe('when render adhoc filters', () => {

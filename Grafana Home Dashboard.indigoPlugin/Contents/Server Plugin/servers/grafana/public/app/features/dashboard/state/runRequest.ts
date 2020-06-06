@@ -1,9 +1,9 @@
 // Libraries
 import { Observable, of, timer, merge, from } from 'rxjs';
 import { flatten, map as lodashMap, isArray, isString } from 'lodash';
-import { map, catchError, takeUntil, mapTo, share, finalize } from 'rxjs/operators';
+import { map, catchError, takeUntil, mapTo, share, finalize, tap } from 'rxjs/operators';
 // Utils & Services
-import { getBackendSrv } from 'app/core/services/backend_srv';
+import { backendSrv } from 'app/core/services/backend_srv';
 // Types
 import {
   DataSourceApi,
@@ -18,6 +18,8 @@ import {
   DataFrame,
   guessFieldTypes,
 } from '@grafana/data';
+import { toDataQueryError } from '@grafana/runtime';
+import { emitDataRequestEvent } from './analyticsProcessor';
 import { ExpressionDatasourceID, expressionDatasource } from 'app/features/expressions/ExpressionDatasource';
 
 type MapOfResponsePackets = { [str: string]: DataQueryResponse };
@@ -78,7 +80,7 @@ export function processResponsePacket(packet: DataQueryResponse, state: RunningQ
  * It will
  *  * Merge multiple responses into a single DataFrame array based on the packet key
  *  * Will emit a loading state if no response after 50ms
- *  * Cancel any still runnning network requests on unsubscribe (using request.requestId)
+ *  * Cancel any still running network requests on unsubscribe (using request.requestId)
  */
 export function runRequest(datasource: DataSourceApi, request: DataQueryRequest): Observable<PanelData> {
   let state: RunningQueryState = {
@@ -116,9 +118,10 @@ export function runRequest(datasource: DataSourceApi, request: DataQueryRequest)
       of({
         ...state.panelData,
         state: LoadingState.Error,
-        error: processQueryError(err),
+        error: toDataQueryError(err),
       })
     ),
+    tap(emitDataRequestEvent(datasource)),
     // finalize is triggered when subscriber unsubscribes
     // This makes sure any still running network requests are cancelled
     finalize(cancelNetworkRequestsOnUnsubscribe(request)),
@@ -129,18 +132,12 @@ export function runRequest(datasource: DataSourceApi, request: DataQueryRequest)
   // If 50ms without a response emit a loading state
   // mapTo will translate the timer event into state.panelData (which has state set to loading)
   // takeUntil will cancel the timer emit when first response packet is received on the dataObservable
-  return merge(
-    timer(200).pipe(
-      mapTo(state.panelData),
-      takeUntil(dataObservable)
-    ),
-    dataObservable
-  );
+  return merge(timer(200).pipe(mapTo(state.panelData), takeUntil(dataObservable)), dataObservable);
 }
 
 function cancelNetworkRequestsOnUnsubscribe(req: DataQueryRequest) {
   return () => {
-    getBackendSrv().resolveCancelerIfExists(req.requestId);
+    backendSrv.resolveCancelerIfExists(req.requestId);
   };
 }
 
@@ -155,30 +152,6 @@ export function callQueryMethod(datasource: DataSourceApi, request: DataQueryReq
   // Otherwise it is a standard datasource request
   const returnVal = datasource.query(request);
   return from(returnVal);
-}
-
-export function processQueryError(err: any): DataQueryError {
-  const error = (err || {}) as DataQueryError;
-
-  if (!error.message) {
-    if (typeof err === 'string' || err instanceof String) {
-      return { message: err } as DataQueryError;
-    }
-
-    let message = 'Query error';
-    if (error.message) {
-      message = error.message;
-    } else if (error.data && error.data.message) {
-      message = error.data.message;
-    } else if (error.data && error.data.error) {
-      message = error.data.error;
-    } else if (error.status) {
-      message = `Query error: ${error.status} ${error.statusText}`;
-    }
-    error.message = message;
-  }
-
-  return error;
 }
 
 /**
@@ -196,9 +169,9 @@ export function getProcessedDataFrames(results?: DataQueryResponseData[]): DataF
   for (const result of results) {
     const dataFrame = guessFieldTypes(toDataFrame(result));
 
-    // clear out any cached calcs
+    // clear out the cached info
     for (const field of dataFrame.fields) {
-      field.calcs = null;
+      field.state = null;
     }
 
     dataFrames.push(dataFrame);
@@ -220,8 +193,13 @@ export function preProcessPanelData(data: PanelData, lastResult: PanelData): Pan
   }
 
   // Make sure the data frames are properly formatted
+  const STARTTIME = performance.now();
+  const processedDataFrames = getProcessedDataFrames(series);
+  const STOPTIME = performance.now();
+
   return {
     ...data,
-    series: getProcessedDataFrames(series),
+    series: processedDataFrames,
+    timings: { dataProcessingTime: STOPTIME - STARTTIME },
   };
 }

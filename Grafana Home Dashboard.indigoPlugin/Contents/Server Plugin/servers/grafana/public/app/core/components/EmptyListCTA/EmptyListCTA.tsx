@@ -1,9 +1,10 @@
-import React, { useContext, MouseEvent } from 'react';
-import { CallToActionCard, LinkButton, ThemeContext } from '@grafana/ui';
+import React, { MouseEvent, useContext } from 'react';
+import { CallToActionCard, LinkButton, ThemeContext, Icon, IconName } from '@grafana/ui';
 import { css } from 'emotion';
+
 export interface Props {
   title: string;
-  buttonIcon: string;
+  buttonIcon: IconName;
   buttonLink?: string;
   buttonTitle: string;
   onClick?: (event: MouseEvent) => void;
@@ -44,7 +45,7 @@ const EmptyListCTA: React.FunctionComponent<Props> = ({
       <>
         {proTip ? (
           <span key="proTipFooter">
-            <i className="fa fa-rocket" />
+            <Icon name="rocket" />
             <> ProTip: {proTip} </>
             <a href={proTipLink} target={proTipTarget} className="text-link">
               {proTipLinkTitle}
@@ -72,7 +73,14 @@ const EmptyListCTA: React.FunctionComponent<Props> = ({
     : '';
 
   const ctaElement = (
-    <LinkButton size="lg" onClick={onClick} href={buttonLink} icon={buttonIcon} className={ctaElementClassName}>
+    <LinkButton
+      size="lg"
+      onClick={onClick}
+      href={buttonLink}
+      icon={buttonIcon}
+      className={ctaElementClassName}
+      aria-label={`Call to action button ${buttonTitle}`}
+    >
       {buttonTitle}
     </LinkButton>
   );

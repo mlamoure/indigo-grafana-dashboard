@@ -4,22 +4,23 @@ import { connect } from 'react-redux';
 import { Collapse } from '@grafana/ui';
 
 import {
-  DataSourceApi,
-  RawTimeRange,
-  LogLevel,
-  TimeZone,
   AbsoluteTimeRange,
+  DataSourceApi,
+  Field,
+  GraphSeriesXY,
+  LogLevel,
   LogRowModel,
   LogsDedupStrategy,
-  TimeRange,
   LogsMetaItem,
-  GraphSeriesXY,
+  RawTimeRange,
+  TimeRange,
+  TimeZone,
 } from '@grafana/data';
 
 import { ExploreId, ExploreItemState } from 'app/types/explore';
 import { StoreState } from 'app/types';
 
-import { changeDedupStrategy, updateTimeRange } from './state/actions';
+import { changeDedupStrategy, splitOpen, updateTimeRange } from './state/actions';
 import { toggleLogLevelAction } from 'app/features/explore/state/actionTypes';
 import { deduplicatedRowsSelector } from 'app/features/explore/state/selectors';
 import { getTimeZone } from '../profile/state/selectors';
@@ -27,10 +28,10 @@ import { LiveLogsWithTheme } from './LiveLogs';
 import { Logs } from './Logs';
 import { LogsCrossFadeTransition } from './utils/LogsCrossFadeTransition';
 import { LiveTailControls } from './useLiveTailControls';
-import { getLinksFromLogsField } from '../panel/panellinks/linkSuppliers';
+import { getFieldLinksForExplore } from './utils/links';
 
 interface LogsContainerProps {
-  datasourceInstance: DataSourceApi | null;
+  datasourceInstance?: DataSourceApi;
   exploreId: ExploreId;
   loading: boolean;
 
@@ -57,6 +58,7 @@ interface LogsContainerProps {
   syncedTimes: boolean;
   absoluteRange: AbsoluteTimeRange;
   isPaused: boolean;
+  splitOpen: typeof splitOpen;
 }
 
 export class LogsContainer extends PureComponent<LogsContainerProps> {
@@ -80,11 +82,15 @@ export class LogsContainer extends PureComponent<LogsContainerProps> {
   getLogRowContext = async (row: LogRowModel, options?: any): Promise<any> => {
     const { datasourceInstance } = this.props;
 
-    if (datasourceInstance) {
+    if (datasourceInstance?.getLogRowContext) {
       return datasourceInstance.getLogRowContext(row, options);
     }
 
     return [];
+  };
+
+  getFieldLinks = (field: Field, rowIndex: number) => {
+    return getFieldLinksForExplore(field, rowIndex, this.props.splitOpen, this.props.range);
   };
 
   render() {
@@ -147,9 +153,10 @@ export class LogsContainer extends PureComponent<LogsContainerProps> {
               timeZone={timeZone}
               scanning={scanning}
               scanRange={range.raw}
+              showContextToggle={this.props.datasourceInstance?.showContextToggle}
               width={width}
               getRowContext={this.getLogRowContext}
-              getFieldLinks={getLinksFromLogsField}
+              getFieldLinks={this.getFieldLinks}
             />
           </Collapse>
         </LogsCrossFadeTransition>
@@ -199,11 +206,7 @@ const mapDispatchToProps = {
   changeDedupStrategy,
   toggleLogLevelAction,
   updateTimeRange,
+  splitOpen,
 };
 
-export default hot(module)(
-  connect(
-    mapStateToProps,
-    mapDispatchToProps
-  )(LogsContainer)
-);
+export default hot(module)(connect(mapStateToProps, mapDispatchToProps)(LogsContainer));

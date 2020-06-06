@@ -1,9 +1,10 @@
 import React from 'react';
 import _ from 'lodash';
 
-import { Select } from '@grafana/ui';
+import { LegacyForms } from '@grafana/ui';
 import { SelectableValue } from '@grafana/data';
 import { Variable } from 'app/types/templates';
+const { Select } = LegacyForms;
 
 export interface Props {
   onChange: (value: string) => void;
@@ -36,7 +37,7 @@ export class MetricSelect extends React.Component<Props, State> {
   }
 
   UNSAFE_componentWillReceiveProps(nextProps: Props) {
-    if (nextProps.options.length > 0 || nextProps.variables.length) {
+    if (nextProps.options.length > 0 || nextProps.variables?.length) {
       this.setState({ options: this.buildOptions(nextProps) });
     }
   }
@@ -53,7 +54,7 @@ export class MetricSelect extends React.Component<Props, State> {
   getVariablesGroup() {
     return {
       label: 'Template Variables',
-      options: this.props.variables.map(v => ({
+      options: this.props.variables?.map(v => ({
         label: `$${v.name}`,
         value: `$${v.name}`,
       })),
@@ -70,14 +71,13 @@ export class MetricSelect extends React.Component<Props, State> {
     const { placeholder, className, isSearchable, onChange } = this.props;
     const { options } = this.state;
     const selectedOption = this.getSelectedOption();
-
     return (
       <Select
         className={className}
         isMulti={false}
         isClearable={false}
         backspaceRemovesValue={false}
-        onChange={item => onChange(item.value)}
+        onChange={item => onChange(item.value ?? '')}
         options={options}
         isSearchable={isSearchable}
         maxMenuHeight={500}

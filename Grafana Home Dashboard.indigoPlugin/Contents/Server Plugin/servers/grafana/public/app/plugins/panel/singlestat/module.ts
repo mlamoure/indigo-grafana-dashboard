@@ -21,12 +21,13 @@ import {
   getDisplayProcessor,
   getColorFromHexRgbOrName,
   PanelEvents,
+  formattedValueToString,
+  locationUtil,
+  getFieldDisplayName,
 } from '@grafana/data';
 
 import { convertOldAngularValueMapping } from '@grafana/ui';
 
-import { CoreEvents } from 'app/types';
-import kbn from 'app/core/utils/kbn';
 import config from 'app/core/config';
 import { MetricsPanelCtrl } from 'app/plugins/sdk';
 import { LinkSrv } from 'app/features/panel/panellinks/link_srv';
@@ -52,7 +53,6 @@ class SingleStatCtrl extends MetricsPanelCtrl {
   data: Partial<ShowData> = {};
 
   fontSizes: any[];
-  unitFormats: any[];
   fieldNames: string[] = [];
 
   invalidGaugeRange: boolean;
@@ -85,7 +85,10 @@ class SingleStatCtrl extends MetricsPanelCtrl {
     postfix: '',
     nullText: null,
     valueMaps: [{ value: 'null', op: '=', text: 'N/A' }],
-    mappingTypes: [{ name: 'value to text', value: 1 }, { name: 'range to text', value: 2 }],
+    mappingTypes: [
+      { name: 'value to text', value: 1 },
+      { name: 'range to text', value: 2 },
+    ],
     rangeMaps: [{ from: 'null', to: 'null', text: 'N/A' }],
     mappingType: 1,
     nullPointMode: 'connected',
@@ -120,7 +123,7 @@ class SingleStatCtrl extends MetricsPanelCtrl {
     super($scope, $injector);
     _.defaults(this.panel, this.panelDefaults);
 
-    this.events.on(CoreEvents.dataFramesReceived, this.onFramesReceived.bind(this));
+    this.events.on(PanelEvents.dataFramesReceived, this.onFramesReceived.bind(this));
     this.events.on(PanelEvents.dataSnapshotLoad, this.onSnapshotLoad.bind(this));
     this.events.on(PanelEvents.editModeInitialized, this.onInitEditMode.bind(this));
 
@@ -134,21 +137,17 @@ class SingleStatCtrl extends MetricsPanelCtrl {
     this.fontSizes = ['20%', '30%', '50%', '70%', '80%', '100%', '110%', '120%', '150%', '170%', '200%'];
     this.addEditorTab('Options', 'public/app/plugins/panel/singlestat/editor.html', 2);
     this.addEditorTab('Value Mappings', 'public/app/plugins/panel/singlestat/mappings.html', 3);
-    this.unitFormats = kbn.getUnitFormats();
   }
 
-  migrateToGaugePanel(migrate: boolean) {
-    if (migrate) {
-      this.onPluginTypeChange(config.panels['gauge']);
-    } else {
-      this.panel.gauge.show = false;
-      this.render();
-    }
+  migrateToPanel(type: string) {
+    this.onPluginTypeChange(config.panels[type]);
   }
 
-  setUnitFormat(subItem: { value: any }) {
-    this.panel.format = subItem.value;
-    this.refresh();
+  setUnitFormat() {
+    return (unit: string) => {
+      this.panel.format = unit;
+      this.refresh();
+    };
   }
 
   onSnapshotLoad(dataList: LegacyResponseData[]) {
@@ -157,6 +156,7 @@ class SingleStatCtrl extends MetricsPanelCtrl {
 
   onFramesReceived(frames: DataFrame[]) {
     const { panel } = this;
+    this.dataList = frames;
 
     if (frames && frames.length > 1) {
       this.data = {
@@ -171,7 +171,8 @@ class SingleStatCtrl extends MetricsPanelCtrl {
     }
 
     const distinct = getDistinctNames(frames);
-    let fieldInfo = distinct.byName[panel.tableColumn]; //
+    let fieldInfo: FieldInfo | undefined = distinct.byName[panel.tableColumn];
+
     this.fieldNames = distinct.names;
 
     if (!fieldInfo) {
@@ -180,11 +181,14 @@ class SingleStatCtrl extends MetricsPanelCtrl {
 
     if (!fieldInfo) {
       const processor = getDisplayProcessor({
-        config: {
-          mappings: convertOldAngularValueMapping(this.panel),
-          noValue: 'No Data',
+        field: {
+          config: {
+            mappings: convertOldAngularValueMapping(this.panel),
+            noValue: 'No Data',
+          },
         },
         theme: config.theme,
+        timeZone: this.dashboard.getTimezone(),
       });
       // When we don't have any field
       this.data = {
@@ -201,7 +205,7 @@ class SingleStatCtrl extends MetricsPanelCtrl {
   processField(fieldInfo: FieldInfo) {
     const { panel, dashboard } = this;
 
-    const name = fieldInfo.field.config.title || fieldInfo.field.name;
+    const name = getFieldDisplayName(fieldInfo.field, fieldInfo.frame.frame, this.dataList as DataFrame[]);
     let calc = panel.valueName;
     let calcField = fieldInfo.field;
     let val: any = undefined;
@@ -239,14 +243,17 @@ class SingleStatCtrl extends MetricsPanelCtrl {
     }
 
     const processor = getDisplayProcessor({
-      config: {
-        ...fieldInfo.field.config,
-        unit: panel.format,
-        decimals: panel.decimals,
-        mappings: convertOldAngularValueMapping(panel),
+      field: {
+        ...fieldInfo.field,
+        config: {
+          ...fieldInfo.field.config,
+          unit: panel.format,
+          decimals: panel.decimals,
+          mappings: convertOldAngularValueMapping(panel),
+        },
       },
       theme: config.theme,
-      isUtc: dashboard.isTimezoneUtc && dashboard.isTimezoneUtc(),
+      timeZone: dashboard.getTimezone(),
     });
 
     const sparkline: any[] = [];
@@ -340,8 +347,11 @@ class SingleStatCtrl extends MetricsPanelCtrl {
     const panel = ctrl.panel;
     const templateSrv = this.templateSrv;
     let linkInfo: LinkModel<any> | null = null;
-    const $panelContainer = elem.find('.panel-container');
     elem = elem.find('.singlestat-panel');
+
+    function getPanelContainer() {
+      return elem.closest('.panel-container');
+    }
 
     function applyColoringThresholds(valueString: string) {
       const data = ctrl.data;
@@ -368,7 +378,12 @@ class SingleStatCtrl extends MetricsPanelCtrl {
         body += getSpan('singlestat-panel-prefix', panel.prefixFontSize, panel.colorPrefix, panel.prefix);
       }
 
-      body += getSpan('singlestat-panel-value', panel.valueFontSize, panel.colorValue, data.display.text);
+      body += getSpan(
+        'singlestat-panel-value',
+        panel.valueFontSize,
+        panel.colorValue,
+        formattedValueToString(data.display)
+      );
 
       if (panel.postfix) {
         body += getSpan('singlestat-panel-postfix', panel.postfixFontSize, panel.colorPostfix, panel.postfix);
@@ -382,7 +397,7 @@ class SingleStatCtrl extends MetricsPanelCtrl {
     function getValueText() {
       const data: ShowData = ctrl.data;
       let result = panel.prefix ? templateSrv.replace(panel.prefix, data.scopedVars) : '';
-      result += data.display.text;
+      result += formattedValueToString(data.display);
       result += panel.postfix ? templateSrv.replace(panel.postfix, data.scopedVars) : '';
 
       return result;
@@ -575,18 +590,18 @@ class SingleStatCtrl extends MetricsPanelCtrl {
       if (panel.colorBackground) {
         const color = getColorForValue(data, data.display.numeric);
         if (color) {
-          $panelContainer.css('background-color', color);
+          getPanelContainer().css('background-color', color);
           if (scope.fullscreen) {
             elem.css('background-color', color);
           } else {
             elem.css('background-color', '');
           }
         } else {
-          $panelContainer.css('background-color', '');
+          getPanelContainer().css('background-color', '');
           elem.css('background-color', '');
         }
       } else {
-        $panelContainer.css('background-color', '');
+        getPanelContainer().css('background-color', '');
         elem.css('background-color', '');
       }
 
@@ -640,7 +655,7 @@ class SingleStatCtrl extends MetricsPanelCtrl {
           window.location.href = linkInfo.href;
         } else {
           $timeout(() => {
-            $location.url(linkInfo.href);
+            $location.url(locationUtil.stripBaseFromUrl(linkInfo!.href));
           });
         }
 
@@ -682,7 +697,7 @@ function getColorForValue(data: any, value: number) {
 
 //------------------------------------------------
 // Private utility functions
-// Somethign like this should be avaliable in a
+// Something like this should be available in a
 //  DataFrame[] abstraction helper
 //------------------------------------------------
 
@@ -719,7 +734,7 @@ function getDistinctNames(data: DataFrame[]): DistinctFieldsInfo {
         if (!distinct.first) {
           distinct.first = f;
         }
-        let t = field.config.title;
+        let t = field.config.displayName;
         if (t && !distinct.byName[t]) {
           distinct.byName[t] = f;
           distinct.names.push(t);

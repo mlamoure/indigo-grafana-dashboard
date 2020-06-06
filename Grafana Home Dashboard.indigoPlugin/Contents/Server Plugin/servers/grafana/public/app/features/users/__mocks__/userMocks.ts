@@ -1,3 +1,5 @@
+import { OrgRole, OrgUser } from 'app/types';
+
 export const getMockUsers = (amount: number) => {
   const users = [];
 
@@ -5,6 +7,7 @@ export const getMockUsers = (amount: number) => {
     users.push({
       avatarUrl: 'url/to/avatar',
       email: `user-${i}@test.com`,
+      name: `user-${i} test`,
       lastSeenAt: '2018-10-01',
       lastSeenAtAge: '',
       login: `user-${i}`,
@@ -14,20 +17,21 @@ export const getMockUsers = (amount: number) => {
     });
   }
 
-  return users;
+  return users as OrgUser[];
 };
 
 export const getMockUser = () => {
   return {
     avatarUrl: 'url/to/avatar',
     email: `user@test.com`,
+    name: 'user test',
     lastSeenAt: '2018-10-01',
     lastSeenAtAge: '',
     login: `user`,
     orgId: 1,
-    role: 'Admin',
+    role: 'Admin' as OrgRole,
     userId: 2,
-  };
+  } as OrgUser;
 };
 
 export const getMockInvitees = (amount: number) => {

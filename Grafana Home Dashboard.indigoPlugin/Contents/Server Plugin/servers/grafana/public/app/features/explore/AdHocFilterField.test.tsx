@@ -171,14 +171,17 @@ describe('AdHocFilterField', () => {
     describe('when called with an empty pairs array', () => {
       describe('and called with keys', () => {
         it('then it should return correct pairs', async () => {
+          // @todo remove lint disable when possible: https://github.com/typescript-eslint/typescript-eslint/issues/902
+          /* eslint-disable @typescript-eslint/no-inferrable-types */
           const { instance } = setup();
           const pairs: KeyValuePair[] = [];
           const index = 0;
-          const key: string = undefined;
+          const key: undefined = undefined;
           const keys: string[] = ['key 1', 'key 2'];
-          const value: string = undefined;
-          const values: string[] = undefined;
-          const operator: string = undefined;
+          const value: undefined = undefined;
+          const values: undefined = undefined;
+          const operator: undefined = undefined;
+          /* eslint-enable @typescript-eslint/no-inferrable-types */
 
           const result = instance.updatePairs(pairs, index, { key, keys, value, values, operator });
 

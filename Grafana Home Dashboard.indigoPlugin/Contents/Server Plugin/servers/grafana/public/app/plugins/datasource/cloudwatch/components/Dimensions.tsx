@@ -1,7 +1,7 @@
 import React, { FunctionComponent, Fragment, useState, useEffect } from 'react';
 import isEqual from 'lodash/isEqual';
 import { SelectableValue } from '@grafana/data';
-import { SegmentAsync } from '@grafana/ui';
+import { SegmentAsync, Icon } from '@grafana/ui';
 import { SelectableStrings } from '../types';
 
 export interface Props {
@@ -42,7 +42,7 @@ export const Dimensions: FunctionComponent<Props> = ({ dimensions, loadValues, l
             allowCustomValue
             value={key}
             loadOptions={() => loadKeys().then(keys => [removeOption, ...excludeUsedKeys(keys)])}
-            onChange={newKey => {
+            onChange={({ value: newKey }) => {
               const { [key]: value, ...newDimensions } = data;
               if (newKey === removeText) {
                 setData({ ...newDimensions });
@@ -54,9 +54,10 @@ export const Dimensions: FunctionComponent<Props> = ({ dimensions, loadValues, l
           <label className="gf-form-label query-segment-operator">=</label>
           <SegmentAsync
             allowCustomValue
-            value={value || 'select dimension value'}
+            value={value}
+            placeholder="select dimension value"
             loadOptions={() => loadValues(key)}
-            onChange={newValue => setData({ ...data, [key]: newValue })}
+            onChange={({ value: newValue }) => setData({ ...data, [key]: newValue })}
           />
           {Object.values(data).length > 1 && index + 1 !== Object.values(data).length && (
             <label className="gf-form-label query-keyword">AND</label>
@@ -68,11 +69,11 @@ export const Dimensions: FunctionComponent<Props> = ({ dimensions, loadValues, l
           allowCustomValue
           Component={
             <a className="gf-form-label query-part">
-              <i className="fa fa-plus" />
+              <Icon name="plus" />
             </a>
           }
           loadOptions={() => loadKeys().then(excludeUsedKeys)}
-          onChange={(newKey: string) => setData({ ...data, [newKey]: '' })}
+          onChange={({ value: newKey }) => setData({ ...data, [newKey]: '' })}
         />
       )}
     </>

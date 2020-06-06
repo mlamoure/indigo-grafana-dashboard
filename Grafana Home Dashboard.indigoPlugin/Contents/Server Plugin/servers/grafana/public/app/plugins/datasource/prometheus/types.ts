@@ -1,13 +1,7 @@
 import { DataQuery, DataSourceJsonData } from '@grafana/data';
 
-export enum PromContext {
-  Explore = 'explore',
-  Panel = 'panel',
-}
-
 export interface PromQuery extends DataQuery {
   expr: string;
-  context?: PromContext;
   format?: string;
   instant?: boolean;
   hinting?: boolean;
@@ -26,6 +20,7 @@ export interface PromOptions extends DataSourceJsonData {
   httpMethod: string;
   directUrl: string;
   customQueryParameters?: string;
+  disableMetricsLookup?: boolean;
 }
 
 export interface PromQueryRequest extends PromQuery {
@@ -34,4 +29,14 @@ export interface PromQueryRequest extends PromQuery {
   start: number;
   end: number;
   headers?: any;
+}
+
+export interface PromMetricsMetadataItem {
+  type: string;
+  help: string;
+  unit?: string;
+}
+
+export interface PromMetricsMetadata {
+  [metric: string]: PromMetricsMetadataItem[];
 }

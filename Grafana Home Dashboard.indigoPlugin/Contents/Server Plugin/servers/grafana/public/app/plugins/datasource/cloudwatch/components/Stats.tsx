@@ -1,7 +1,7 @@
 import React, { FunctionComponent } from 'react';
 import { SelectableStrings } from '../types';
 import { SelectableValue } from '@grafana/data';
-import { Segment } from '@grafana/ui';
+import { Segment, Icon } from '@grafana/ui';
 
 export interface Props {
   values: string[];
@@ -22,7 +22,7 @@ export const Stats: FunctionComponent<Props> = ({ stats, values, onChange, varia
           key={value + index}
           value={value}
           options={[removeOption, ...stats, variableOptionGroup]}
-          onChange={value =>
+          onChange={({ value }) =>
             onChange(
               value === removeText
                 ? values.filter((_, i) => i !== index)
@@ -31,17 +31,15 @@ export const Stats: FunctionComponent<Props> = ({ stats, values, onChange, varia
           }
         />
       ))}
-    {values.length !== stats.length && (
-      <Segment
-        Component={
-          <a className="gf-form-label query-part">
-            <i className="fa fa-plus" />
-          </a>
-        }
-        allowCustomValue
-        onChange={(value: string) => onChange([...values, value])}
-        options={[...stats.filter(({ value }) => !values.includes(value)), variableOptionGroup]}
-      />
-    )}
+    <Segment
+      Component={
+        <a className="gf-form-label query-part">
+          <Icon name="plus" />
+        </a>
+      }
+      allowCustomValue
+      onChange={({ value }) => onChange([...values, value])}
+      options={[...stats.filter(({ value }) => !values.includes(value)), variableOptionGroup]}
+    />
   </>
 );

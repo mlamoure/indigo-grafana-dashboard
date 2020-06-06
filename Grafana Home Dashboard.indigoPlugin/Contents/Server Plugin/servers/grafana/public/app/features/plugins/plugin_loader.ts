@@ -1,8 +1,7 @@
 import _ from 'lodash';
 import * as sdk from 'app/plugins/sdk';
 import kbn from 'app/core/utils/kbn';
-// tslint:disable:import-blacklist
-import moment from 'moment';
+import moment from 'moment'; // eslint-disable-line no-restricted-imports
 import angular from 'angular';
 import jquery from 'jquery';
 
@@ -22,11 +21,21 @@ import config from 'app/core/config';
 import TimeSeries from 'app/core/time_series2';
 import TableModel from 'app/core/table_model';
 import { coreModule, appEvents, contextSrv } from 'app/core/core';
-import { DataSourcePlugin, AppPlugin, PanelPlugin, PluginMeta, DataSourcePluginMeta, dateMath } from '@grafana/data';
-import * as fileExport from 'app/core/utils/file_export';
+import {
+  DataSourcePlugin,
+  AppPlugin,
+  PanelPlugin,
+  PluginMeta,
+  DataSourcePluginMeta,
+  dateMath,
+  DataSourceApi,
+  DataSourceJsonData,
+  DataQuery,
+} from '@grafana/data';
 import * as flatten from 'app/core/utils/flatten';
 import * as ticks from 'app/core/utils/ticks';
 import { BackendSrv, getBackendSrv } from 'app/core/services/backend_srv';
+import { promiseToDigest } from 'app/core/utils/promiseToDigest';
 import impressionSrv from 'app/core/services/impression_srv';
 import builtInPlugins from './built_in_plugins';
 import * as d3 from 'd3';
@@ -121,10 +130,13 @@ exposeToPlugin('app/core/services/backend_srv', {
 
 exposeToPlugin('app/plugins/sdk', sdk);
 exposeToPlugin('app/core/utils/datemath', dateMath);
-exposeToPlugin('app/core/utils/file_export', fileExport);
 exposeToPlugin('app/core/utils/flatten', flatten);
 exposeToPlugin('app/core/utils/kbn', kbn);
 exposeToPlugin('app/core/utils/ticks', ticks);
+exposeToPlugin('app/core/utils/promiseToDigest', {
+  promiseToDigest: promiseToDigest,
+  __esModule: true,
+});
 
 exposeToPlugin('app/core/config', config);
 exposeToPlugin('app/core/time_series', TimeSeries);
@@ -143,7 +155,6 @@ import 'vendor/flot/jquery.flot';
 import 'vendor/flot/jquery.flot.selection';
 import 'vendor/flot/jquery.flot.time';
 import 'vendor/flot/jquery.flot.stack';
-import 'vendor/flot/jquery.flot.pie';
 import 'vendor/flot/jquery.flot.stackpercent';
 import 'vendor/flot/jquery.flot.fillbelow';
 import 'vendor/flot/jquery.flot.crosshair';
@@ -180,16 +191,20 @@ export async function importPluginModule(path: string): Promise<any> {
   return grafanaRuntime.SystemJS.import(path);
 }
 
-export function importDataSourcePlugin(meta: DataSourcePluginMeta): Promise<DataSourcePlugin<any>> {
+export function importDataSourcePlugin(meta: DataSourcePluginMeta): Promise<GenericDataSourcePlugin> {
   return importPluginModule(meta.module).then(pluginExports => {
     if (pluginExports.plugin) {
-      const dsPlugin = pluginExports.plugin as DataSourcePlugin<any>;
+      const dsPlugin = pluginExports.plugin as GenericDataSourcePlugin;
       dsPlugin.meta = meta;
       return dsPlugin;
     }
 
     if (pluginExports.Datasource) {
-      const dsPlugin = new DataSourcePlugin(pluginExports.Datasource);
+      const dsPlugin = new DataSourcePlugin<
+        DataSourceApi<DataQuery, DataSourceJsonData>,
+        DataQuery,
+        DataSourceJsonData
+      >(pluginExports.Datasource);
       dsPlugin.setComponentsFromLegacyExports(pluginExports);
       dsPlugin.meta = meta;
       return dsPlugin;
@@ -210,23 +225,27 @@ export function importAppPlugin(meta: PluginMeta): Promise<AppPlugin> {
 }
 
 import { getPanelPluginNotFound, getPanelPluginLoadError } from '../dashboard/dashgrid/PanelPluginError';
+import { GenericDataSourcePlugin } from '../datasources/settings/PluginSettings';
 
 interface PanelCache {
-  [key: string]: PanelPlugin;
+  [key: string]: Promise<PanelPlugin>;
 }
 const panelCache: PanelCache = {};
 
 export function importPanelPlugin(id: string): Promise<PanelPlugin> {
   const loaded = panelCache[id];
+
   if (loaded) {
-    return Promise.resolve(loaded);
+    return loaded;
   }
+
   const meta = config.panels[id];
+
   if (!meta) {
     return Promise.resolve(getPanelPluginNotFound(id));
   }
 
-  return importPluginModule(meta.module)
+  panelCache[id] = importPluginModule(meta.module)
     .then(pluginExports => {
       if (pluginExports.plugin) {
         return pluginExports.plugin as PanelPlugin;
@@ -239,11 +258,13 @@ export function importPanelPlugin(id: string): Promise<PanelPlugin> {
     })
     .then(plugin => {
       plugin.meta = meta;
-      return (panelCache[meta.id] = plugin);
+      return plugin;
     })
     .catch(err => {
       // TODO, maybe a different error plugin
       console.warn('Error loading panel plugin: ' + id, err);
       return getPanelPluginLoadError(meta, err);
     });
+
+  return panelCache[id];
 }

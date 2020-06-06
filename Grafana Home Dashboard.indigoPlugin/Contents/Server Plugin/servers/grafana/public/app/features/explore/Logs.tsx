@@ -15,15 +15,25 @@ import {
   LinkModel,
   Field,
 } from '@grafana/data';
-import { Switch, LogLabels, ToggleButtonGroup, ToggleButton, LogRows } from '@grafana/ui';
+import { LegacyForms, LogLabels, ToggleButtonGroup, ToggleButton, LogRows } from '@grafana/ui';
+const { Switch } = LegacyForms;
+import store from 'app/core/store';
 
 import { ExploreGraphPanel } from './ExploreGraphPanel';
+import { MetaInfoText } from './MetaInfoText';
+import { RowContextOptions } from '@grafana/ui/src/components/Logs/LogRowContextProvider';
+
+const SETTINGS_KEYS = {
+  showLabels: 'grafana.explore.logs.showLabels',
+  showTime: 'grafana.explore.logs.showTime',
+  wrapLogMessage: 'grafana.explore.logs.wrapLogMessage',
+};
 
 function renderMetaItem(value: any, kind: LogsMetaKind) {
   if (kind === LogsMetaKind.LabelsMap) {
     return (
       <span className="logs-meta-item__labels">
-        <LogLabels labels={value} plain getRows={() => []} />
+        <LogLabels labels={value} />
       </span>
     );
   }
@@ -37,13 +47,14 @@ interface Props {
   dedupedRows?: LogRowModel[];
 
   width: number;
-  highlighterExpressions: string[];
+  highlighterExpressions?: string[];
   loading: boolean;
   absoluteRange: AbsoluteTimeRange;
   timeZone: TimeZone;
   scanning?: boolean;
   scanRange?: RawTimeRange;
   dedupStrategy: LogsDedupStrategy;
+  showContextToggle?: (row?: LogRowModel) => boolean;
   onChangeTime: (range: AbsoluteTimeRange) => void;
   onClickFilterLabel?: (key: string, value: string) => void;
   onClickFilterOutLabel?: (key: string, value: string) => void;
@@ -51,17 +62,21 @@ interface Props {
   onStopScanning?: () => void;
   onDedupStrategyChange: (dedupStrategy: LogsDedupStrategy) => void;
   onToggleLogLevel: (hiddenLogLevels: LogLevel[]) => void;
-  getRowContext?: (row: LogRowModel, options?: any) => Promise<any>;
+  getRowContext?: (row: LogRowModel, options?: RowContextOptions) => Promise<any>;
   getFieldLinks: (field: Field, rowIndex: number) => Array<LinkModel<Field>>;
 }
 
 interface State {
+  showLabels: boolean;
   showTime: boolean;
+  wrapLogMessage: boolean;
 }
 
 export class Logs extends PureComponent<Props, State> {
   state = {
-    showTime: true,
+    showLabels: store.getBool(SETTINGS_KEYS.showLabels, false),
+    showTime: store.getBool(SETTINGS_KEYS.showTime, true),
+    wrapLogMessage: store.getBool(SETTINGS_KEYS.wrapLogMessage, true),
   };
 
   onChangeDedup = (dedup: LogsDedupStrategy) => {
@@ -72,12 +87,36 @@ export class Logs extends PureComponent<Props, State> {
     return onDedupStrategyChange(dedup);
   };
 
+  onChangeLabels = (event?: React.SyntheticEvent) => {
+    const target = event && (event.target as HTMLInputElement);
+    if (target) {
+      const showLabels = target.checked;
+      this.setState({
+        showLabels,
+      });
+      store.set(SETTINGS_KEYS.showLabels, showLabels);
+    }
+  };
+
   onChangeTime = (event?: React.SyntheticEvent) => {
     const target = event && (event.target as HTMLInputElement);
     if (target) {
+      const showTime = target.checked;
       this.setState({
-        showTime: target.checked,
+        showTime,
       });
+      store.set(SETTINGS_KEYS.showTime, showTime);
+    }
+  };
+
+  onChangewrapLogMessage = (event?: React.SyntheticEvent) => {
+    const target = event && (event.target as HTMLInputElement);
+    if (target) {
+      const wrapLogMessage = target.checked;
+      this.setState({
+        wrapLogMessage,
+      });
+      store.set(SETTINGS_KEYS.wrapLogMessage, wrapLogMessage);
     }
   };
 
@@ -112,6 +151,7 @@ export class Logs extends PureComponent<Props, State> {
       timeZone,
       scanning,
       scanRange,
+      showContextToggle,
       width,
       dedupedRows,
       absoluteRange,
@@ -123,7 +163,7 @@ export class Logs extends PureComponent<Props, State> {
       return null;
     }
 
-    const { showTime } = this.state;
+    const { showLabels, showTime, wrapLogMessage } = this.state;
     const { dedupStrategy } = this.props;
     const hasData = logRows && logRows.length > 0;
     const dedupCount = dedupedRows
@@ -164,6 +204,8 @@ export class Logs extends PureComponent<Props, State> {
         <div className="logs-panel-options">
           <div className="logs-panel-controls">
             <Switch label="Time" checked={showTime} onChange={this.onChangeTime} transparent />
+            <Switch label="Unique labels" checked={showLabels} onChange={this.onChangeLabels} transparent />
+            <Switch label="Wrap lines" checked={wrapLogMessage} onChange={this.onChangewrapLogMessage} transparent />
             <ToggleButtonGroup label="Dedup" transparent={true}>
               {Object.keys(LogsDedupStrategy).map((dedupType: string, i) => (
                 <ToggleButton
@@ -182,14 +224,14 @@ export class Logs extends PureComponent<Props, State> {
         </div>
 
         {hasData && meta && (
-          <div className="logs-panel-meta">
-            {meta.map(item => (
-              <div className="logs-panel-meta__item" key={item.label}>
-                <span className="logs-panel-meta__label">{item.label}:</span>
-                <span className="logs-panel-meta__value">{renderMetaItem(item.value, item.kind)}</span>
-              </div>
-            ))}
-          </div>
+          <MetaInfoText
+            metaItems={meta.map(item => {
+              return {
+                label: item.label,
+                value: renderMetaItem(item.value, item.kind),
+              };
+            })}
+          />
         )}
 
         <LogRows
@@ -201,7 +243,10 @@ export class Logs extends PureComponent<Props, State> {
           rowLimit={logRows ? logRows.length : undefined}
           onClickFilterLabel={onClickFilterLabel}
           onClickFilterOutLabel={onClickFilterOutLabel}
+          showContextToggle={showContextToggle}
+          showLabels={showLabels}
           showTime={showTime}
+          wrapLogMessage={wrapLogMessage}
           timeZone={timeZone}
           getFieldLinks={getFieldLinks}
         />
