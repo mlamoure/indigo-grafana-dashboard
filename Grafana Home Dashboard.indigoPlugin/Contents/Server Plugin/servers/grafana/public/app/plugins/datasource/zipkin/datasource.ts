@@ -29,7 +29,9 @@ export class ZipkinDatasource extends DataSourceApi<ZipkinQuery> {
   query(options: DataQueryRequest<ZipkinQuery>): Observable<DataQueryResponse> {
     const traceId = options.targets[0]?.query;
     if (traceId) {
-      return this.request<ZipkinSpan[]>(`${apiPrefix}/trace/${traceId}`).pipe(map(responseToDataQueryResponse));
+      return this.request<ZipkinSpan[]>(`${apiPrefix}/trace/${encodeURIComponent(traceId)}`).pipe(
+        map(responseToDataQueryResponse)
+      );
     } else {
       return of(emptyDataQueryResponse);
     }
@@ -76,6 +78,9 @@ function responseToDataQueryResponse(response: { data: ZipkinSpan[] }): DataQuer
             values: response?.data ? [transformResponse(response?.data)] : [],
           },
         ],
+        meta: {
+          preferredVisualisationType: 'trace',
+        },
       }),
     ],
   };
@@ -91,6 +96,9 @@ const emptyDataQueryResponse = {
           values: [],
         },
       ],
+      meta: {
+        preferredVisualisationType: 'trace',
+      },
     }),
   ],
 };

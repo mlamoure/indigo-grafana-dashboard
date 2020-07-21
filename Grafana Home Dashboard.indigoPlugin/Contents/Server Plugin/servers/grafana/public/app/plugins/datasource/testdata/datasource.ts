@@ -1,17 +1,19 @@
+import set from 'lodash/set';
+
 import {
+  ArrayDataFrame,
+  arrowTableToDataFrame,
+  base64StringToArrowTable,
+  DataFrame,
   DataQueryError,
   DataQueryRequest,
   DataQueryResponse,
   DataSourceApi,
   DataSourceInstanceSettings,
+  LoadingState,
   MetricFindValue,
   TableData,
   TimeSeries,
-  LoadingState,
-  ArrayDataFrame,
-  base64StringToArrowTable,
-  arrowTableToDataFrame,
-  DataFrame,
 } from '@grafana/data';
 import { Scenario, TestDataQuery } from './types';
 import { getBackendSrv, toDataQueryError } from '@grafana/runtime';
@@ -19,7 +21,7 @@ import { queryMetricTree } from './metricTree';
 import { from, merge, Observable, of } from 'rxjs';
 import { runStream } from './runStreams';
 import templateSrv from 'app/features/templating/template_srv';
-import { getSearchFilterScopedVar } from 'app/features/templating/utils';
+import { getSearchFilterScopedVar } from 'app/features/variables/utils';
 
 type TestData = TimeSeries | TableData;
 
@@ -86,6 +88,11 @@ export class TestDataDataSource extends DataSourceApi<TestDataQuery> {
         const table = t as TableData;
         table.refId = query.refId;
         table.name = query.alias;
+
+        if (query.scenarioId === 'logs') {
+          set(table, 'meta.preferredVisualisationType', 'logs');
+        }
+
         data.push(table);
       }
 

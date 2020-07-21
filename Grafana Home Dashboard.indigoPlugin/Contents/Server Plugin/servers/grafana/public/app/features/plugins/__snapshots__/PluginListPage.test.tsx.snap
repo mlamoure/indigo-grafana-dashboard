@@ -25,6 +25,7 @@ exports[`Render should render component 1`] = `
       }
       searchQuery=""
       setSearchQuery={[Function]}
+      target="_blank"
     />
   </PageContents>
 </Page>
@@ -55,6 +56,7 @@ exports[`Render should render list 1`] = `
       }
       searchQuery=""
       setSearchQuery={[Function]}
+      target="_blank"
     />
     <PluginList
       plugins={Array []}

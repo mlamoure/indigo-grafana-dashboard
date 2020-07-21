@@ -6,24 +6,23 @@ import classNames from 'classnames';
 import { css } from 'emotion';
 
 import { ExploreId, ExploreItemState } from 'app/types/explore';
-import { ToggleButtonGroup, ToggleButton, Tooltip, LegacyForms, SetInterval, Icon, IconButton } from '@grafana/ui';
-const { ButtonSelect } = LegacyForms;
-import { RawTimeRange, TimeZone, TimeRange, DataQuery, ExploreMode } from '@grafana/data';
+import { Icon, IconButton, LegacyForms, SetInterval, Tooltip } from '@grafana/ui';
+import { DataQuery, RawTimeRange, TimeRange, TimeZone } from '@grafana/data';
 import { DataSourcePicker } from 'app/core/components/Select/DataSourcePicker';
 import { StoreState } from 'app/types/store';
 import {
-  changeDatasource,
   cancelQueries,
+  changeDatasource,
+  changeRefreshInterval,
   clearQueries,
-  splitClose,
   runQueries,
+  splitClose,
   splitOpen,
   syncTimes,
-  changeRefreshInterval,
-  changeMode,
 } from './state/actions';
 import { updateLocation } from 'app/core/actions';
 import { getTimeZone } from '../profile/state/selectors';
+import { updateTimeZoneForSession } from '../profile/state/reducers';
 import { getDashboardSrv } from '../dashboard/services/DashboardSrv';
 import kbn from '../../core/utils/kbn';
 import { ExploreTimeControls } from './ExploreTimeControls';
@@ -33,6 +32,8 @@ import { RunButton } from './RunButton';
 import { LiveTailControls } from './useLiveTailControls';
 import { getExploreDatasources } from './state/selectors';
 import { setDashboardQueriesToUpdateOnLoad } from '../dashboard/state/reducers';
+
+const { ButtonSelect } = LegacyForms;
 
 const getStyles = memoizeOne(() => {
   return {
@@ -58,8 +59,6 @@ interface StateProps {
   splitted: boolean;
   syncedTimes: boolean;
   refreshInterval?: string;
-  supportedModes: ExploreMode[];
-  selectedMode: ExploreMode;
   hasLiveOption: boolean;
   isLive: boolean;
   isPaused: boolean;
@@ -79,16 +78,16 @@ interface DispatchProps {
   split: typeof splitOpen;
   syncTimes: typeof syncTimes;
   changeRefreshInterval: typeof changeRefreshInterval;
-  changeMode: typeof changeMode;
   updateLocation: typeof updateLocation;
   setDashboardQueriesToUpdateOnLoad: typeof setDashboardQueriesToUpdateOnLoad;
+  onChangeTimeZone: typeof updateTimeZoneForSession;
 }
 
 type Props = StateProps & DispatchProps & OwnProps;
 
 export class UnConnectedExploreToolbar extends PureComponent<Props> {
   onChangeDatasource = async (option: { value: any }) => {
-    this.props.changeDatasource(this.props.exploreId, option.value);
+    this.props.changeDatasource(this.props.exploreId, option.value, { importQueries: true });
   };
 
   onClearAll = () => {
@@ -106,11 +105,6 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
   onChangeRefreshInterval = (item: string) => {
     const { changeRefreshInterval, exploreId } = this.props;
     changeRefreshInterval(exploreId, item);
-  };
-
-  onModeChange = (mode: ExploreMode) => {
-    const { changeMode, exploreId } = this.props;
-    changeMode(exploreId, mode);
   };
 
   onChangeTimeSync = () => {
@@ -171,14 +165,13 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
       refreshInterval,
       onChangeTime,
       split,
-      supportedModes,
-      selectedMode,
       hasLiveOption,
       isLive,
       isPaused,
       originPanelId,
       datasourceLoading,
       containerWidth,
+      onChangeTimeZone,
     } = this.props;
 
     const styles = getStyles();
@@ -190,8 +183,6 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
 
     const showSmallDataSourcePicker = (splitted ? containerWidth < 700 : containerWidth < 800) || false;
     const showSmallTimePicker = splitted || containerWidth < 1210;
-
-    const showModeToggle = supportedModes.length > 1;
 
     return (
       <div className={splitted ? 'explore-toolbar splitted' : 'explore-toolbar'}>
@@ -235,28 +226,6 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
                     hideTextValue={showSmallDataSourcePicker}
                   />
                 </div>
-                {showModeToggle ? (
-                  <div className="query-type-toggle">
-                    <ToggleButtonGroup label="" transparent={true}>
-                      <ToggleButton
-                        key={ExploreMode.Metrics}
-                        value={ExploreMode.Metrics}
-                        onChange={this.onModeChange}
-                        selected={selectedMode === ExploreMode.Metrics}
-                      >
-                        {'Metrics'}
-                      </ToggleButton>
-                      <ToggleButton
-                        key={ExploreMode.Logs}
-                        value={ExploreMode.Logs}
-                        onChange={this.onModeChange}
-                        selected={selectedMode === ExploreMode.Logs}
-                      >
-                        {'Logs'}
-                      </ToggleButton>
-                    </ToggleButtonGroup>
-                  </div>
-                ) : null}
               </div>
             ) : null}
 
@@ -304,6 +273,7 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
                   syncedTimes={syncedTimes}
                   onChangeTimeSync={this.onChangeTimeSync}
                   hideText={showSmallTimePicker}
+                  onChangeTimeZone={onChangeTimeZone}
                 />
               </div>
             )}
@@ -366,8 +336,6 @@ const mapStateToProps = (state: StoreState, { exploreId }: OwnProps): StateProps
     range,
     refreshInterval,
     loading,
-    supportedModes,
-    mode,
     isLive,
     isPaused,
     originPanelId,
@@ -376,7 +344,7 @@ const mapStateToProps = (state: StoreState, { exploreId }: OwnProps): StateProps
     containerWidth,
   } = exploreItem;
 
-  const hasLiveOption = !!(datasourceInstance?.meta?.streaming && mode === ExploreMode.Logs);
+  const hasLiveOption = !!datasourceInstance?.meta?.streaming;
 
   return {
     datasourceMissing,
@@ -386,15 +354,13 @@ const mapStateToProps = (state: StoreState, { exploreId }: OwnProps): StateProps
     timeZone: getTimeZone(state.user),
     splitted,
     refreshInterval,
-    supportedModes,
-    selectedMode: supportedModes.includes(mode) ? mode : supportedModes[0],
     hasLiveOption,
     isLive,
     isPaused,
     originPanelId,
     queries,
     syncedTimes,
-    datasourceLoading,
+    datasourceLoading: datasourceLoading ?? undefined,
     containerWidth,
   };
 };
@@ -409,8 +375,8 @@ const mapDispatchToProps: DispatchProps = {
   closeSplit: splitClose,
   split: splitOpen,
   syncTimes,
-  changeMode: changeMode,
   setDashboardQueriesToUpdateOnLoad,
+  onChangeTimeZone: updateTimeZoneForSession,
 };
 
 export const ExploreToolbar = hot(module)(connect(mapStateToProps, mapDispatchToProps)(UnConnectedExploreToolbar));

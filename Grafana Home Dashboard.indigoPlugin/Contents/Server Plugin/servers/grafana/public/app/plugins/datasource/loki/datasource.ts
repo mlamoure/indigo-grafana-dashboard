@@ -4,7 +4,7 @@ import { Observable, from, merge, of } from 'rxjs';
 import { map, filter, catchError, switchMap } from 'rxjs/operators';
 
 // Services & Utils
-import { DataFrame, dateMath, FieldCache } from '@grafana/data';
+import { DataFrame, dateMath, FieldCache, QueryResultMeta } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
 import { addLabelToQuery } from 'app/plugins/datasource/prometheus/add_label_to_query';
 import { DatasourceRequestOptions } from 'app/core/services/backend_srv';
@@ -20,7 +20,6 @@ import {
   LoadingState,
   AnnotationEvent,
   DataFrameView,
-  TimeSeries,
   PluginMeta,
   DataSourceApi,
   DataSourceInstanceSettings,
@@ -28,7 +27,6 @@ import {
   DataQueryRequest,
   DataQueryResponse,
   AnnotationQueryRequest,
-  ExploreMode,
   ScopedVars,
 } from '@grafana/data';
 
@@ -93,30 +91,7 @@ export class LokiDatasource extends DataSourceApi<LokiQuery, LokiOptions> {
         expr: this.templateSrv.replace(target.expr, options.scopedVars, this.interpolateQueryExpr),
       }));
 
-    if (options.exploreMode === ExploreMode.Metrics) {
-      filteredTargets.forEach(target =>
-        subQueries.push(
-          this.runInstantQuery(target, options, filteredTargets.length),
-          this.runRangeQuery(target, options, filteredTargets.length)
-        )
-      );
-    } else {
-      filteredTargets.forEach(target =>
-        subQueries.push(
-          this.runRangeQuery(target, options, filteredTargets.length).pipe(
-            map(dataQueryResponse => {
-              if (options.exploreMode === ExploreMode.Logs && dataQueryResponse.data.find(d => isTimeSeries(d))) {
-                throw new Error(
-                  'Logs mode does not support queries that return time series data. Please perform a logs query or switch to Metrics mode.'
-                );
-              } else {
-                return dataQueryResponse;
-              }
-            })
-          )
-        )
-      );
-    }
+    filteredTargets.forEach(target => subQueries.push(this.runRangeQuery(target, options, filteredTargets.length)));
 
     // No valid targets, return the empty result to save a round trip.
     if (isEmpty(subQueries)) {
@@ -140,17 +115,24 @@ export class LokiDatasource extends DataSourceApi<LokiQuery, LokiOptions> {
       time: `${timeNs + (1e9 - (timeNs % 1e9))}`,
       limit: Math.min(options.maxDataPoints || Infinity, this.maxLines),
     };
+    /** Show results of Loki instant queries only in table */
+    const meta: QueryResultMeta = {
+      preferredVisualisationType: 'table',
+    };
 
     return this._request(INSTANT_QUERY_ENDPOINT, query).pipe(
       catchError((err: any) => this.throwUnless(err, err.cancelled, target)),
       filter((response: any) => (response.cancelled ? false : true)),
       map((response: { data: LokiResponse }) => {
         if (response.data.data.resultType === LokiResultType.Stream) {
-          throw new Error('Metrics mode does not support logs. Use an aggregation or switch to Logs mode.');
+          return {
+            data: [],
+            key: `${target.refId}_instant`,
+          };
         }
 
         return {
-          data: [lokiResultsToTableModel(response.data.data.result, responseListLength, target.refId, true)],
+          data: [lokiResultsToTableModel(response.data.data.result, responseListLength, target.refId, meta, true)],
           key: `${target.refId}_instant`,
         };
       })
@@ -405,7 +387,7 @@ export class LokiDatasource extends DataSourceApi<LokiQuery, LokiOptions> {
 
   prepareLogRowContextQueryTarget = (row: LogRowModel, limit: number, direction: 'BACKWARD' | 'FORWARD') => {
     const query = Object.keys(row.labels)
-      .map(label => `${label}="${row.labels[label]}"`)
+      .map(label => `${label}="${row.labels[label].replace(/\\/g, '\\\\')}"`) // escape backslashes in label as users can't escape them by themselves
       .join(',');
 
     const contextTimeBuffer = 2 * 60 * 60 * 1000; // 2h buffer
@@ -514,7 +496,7 @@ export class LokiDatasource extends DataSourceApi<LokiQuery, LokiOptions> {
   }
 
   showContextToggle = (row?: LogRowModel) => {
-    return row.searchWords && row.searchWords.length > 0;
+    return row && row.searchWords && row.searchWords.length > 0;
   };
 
   throwUnless = (err: any, condition: boolean, target: LokiQuery) => {
@@ -534,7 +516,11 @@ export class LokiDatasource extends DataSourceApi<LokiQuery, LokiOptions> {
 
     if (err.data) {
       if (typeof err.data === 'string') {
-        error.message = err.data;
+        if (err.data.includes('escape') && target.expr.includes('\\')) {
+          error.message = `Error: ${err.data}. Make sure that all special characters are escaped with \\. For more information on escaping of special characters visit LogQL documentation at https://github.com/grafana/loki/blob/master/docs/logql.md.`;
+        } else {
+          error.message = err.data;
+        }
       } else if (err.data.error) {
         error.message = safeStringifyValue(err.data.error);
       }
@@ -575,7 +561,3 @@ export function lokiSpecialRegexEscape(value: any) {
 }
 
 export default LokiDatasource;
-
-function isTimeSeries(data: any): data is TimeSeries {
-  return data.hasOwnProperty('datapoints');
-}

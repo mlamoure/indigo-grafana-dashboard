@@ -45,6 +45,7 @@ export class PluginListPage extends PureComponent<Props> {
               searchQuery={searchQuery}
               setSearchQuery={query => setPluginsSearchQuery(query)}
               linkButton={linkButton}
+              target="_blank"
             />
             {hasFetched && plugins && plugins && <PluginList plugins={plugins} />}
           </>
