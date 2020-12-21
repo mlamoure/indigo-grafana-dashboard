@@ -2,7 +2,7 @@ import _ from 'lodash';
 import { alignOptions, aggOptions, ValueTypes, MetricKind, systemLabels } from './constants';
 import { SelectableValue } from '@grafana/data';
 import CloudMonitoringDatasource from './datasource';
-import { TemplateSrv } from 'app/features/templating/template_srv';
+import { TemplateSrv } from '@grafana/runtime';
 import { MetricDescriptor, Filter, MetricQuery } from './types';
 
 export const extractServicesFromMetricDescriptors = (metricDescriptors: MetricDescriptor[]) =>
@@ -93,7 +93,7 @@ export const labelsToGroupedOptions = (groupBys: string[]) => {
 };
 
 export const filtersToStringArray = (filters: Filter[]) => {
-  const strArr = _.flatten(filters.map(({ key, operator, value, condition }) => [key, operator, value, condition]));
+  const strArr = _.flatten(filters.map(({ key, operator, value, condition }) => [key, operator, value, condition!]));
   return strArr.filter((_, i) => i !== strArr.length - 1);
 };
 
@@ -120,7 +120,7 @@ export const formatCloudMonitoringError = (error: any) => {
     try {
       message = JSON.parse(error.data.message).error.message;
     } catch (err) {
-      error.error;
+      error.error = err;
     }
   }
   return message;

@@ -5,16 +5,14 @@ import { SelectableValue } from '@grafana/data';
 import { Segment, Icon } from '@grafana/ui';
 import { getAggregationOptionsByMetric } from '../functions';
 import { ValueTypes, MetricKind } from '../constants';
+import { MetricDescriptor } from '../types';
 
 export interface Props {
   onChange: (metricDescriptor: string) => void;
-  metricDescriptor: {
-    valueType: string;
-    metricKind: string;
-  };
+  metricDescriptor?: MetricDescriptor;
   crossSeriesReducer: string;
   groupBys: string[];
-  children?: (renderProps: any) => JSX.Element;
+  children: (displayAdvancedOptions: boolean) => React.ReactNode;
   templateVariableOptions: Array<SelectableValue<string>>;
 }
 
@@ -24,11 +22,11 @@ export const Aggregations: FC<Props> = props => {
   const selected = useSelectedFromOptions(aggOptions, props);
 
   return (
-    <>
+    <div data-testid="aggregations">
       <div className="gf-form-inline">
         <label className="gf-form-label query-keyword width-9">Aggregation</label>
         <Segment
-          onChange={({ value }) => props.onChange(value)}
+          onChange={({ value }) => props.onChange(value!)}
           value={selected}
           options={[
             {
@@ -42,7 +40,7 @@ export const Aggregations: FC<Props> = props => {
             },
           ]}
           placeholder="Select Reducer"
-        ></Segment>
+        />
         <div className="gf-form gf-form--grow">
           <label className="gf-form-label gf-form-label--grow">
             <a onClick={() => setDisplayAdvancedOptions(!displayAdvancedOptions)}>
@@ -54,7 +52,7 @@ export const Aggregations: FC<Props> = props => {
         </div>
       </div>
       {props.children(displayAdvancedOptions)}
-    </>
+    </div>
   );
 };
 

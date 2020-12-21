@@ -378,8 +378,13 @@ describe('ElasticDatasource', function(this: any) {
               mappings: {
                 metricsets: {
                   _all: {},
+                  _meta: {
+                    test: 'something',
+                  },
                   properties: {
                     '@timestamp': { type: 'date' },
+                    __timestamp: { type: 'date' },
+                    '@timestampnano': { type: 'date_nanos' },
                     beat: {
                       properties: {
                         name: {
@@ -426,6 +431,8 @@ describe('ElasticDatasource', function(this: any) {
       const fields = _.map(fieldObjects, 'text');
       expect(fields).toEqual([
         '@timestamp',
+        '__timestamp',
+        '@timestampnano',
         'beat.name.raw',
         'beat.name',
         'beat.hostname',
@@ -455,7 +462,7 @@ describe('ElasticDatasource', function(this: any) {
       });
 
       const fields = _.map(fieldObjects, 'text');
-      expect(fields).toEqual(['@timestamp']);
+      expect(fields).toEqual(['@timestamp', '__timestamp', '@timestampnano']);
     });
   });
 
@@ -873,6 +880,7 @@ describe('enhanceDataFrame', () => {
         },
       ],
     });
+
     enhanceDataFrame(df, [
       {
         field: 'urlField',
@@ -885,13 +893,13 @@ describe('enhanceDataFrame', () => {
       },
     ]);
 
-    expect(df.fields[0].config.links?.length).toBe(1);
-    expect(df.fields[0].config.links?.[0]).toEqual({
+    expect(df.fields[0].config.links!.length).toBe(1);
+    expect(df.fields[0].config.links![0]).toEqual({
       title: '',
       url: 'someUrl',
     });
-    expect(df.fields[1].config.links?.length).toBe(1);
-    expect(df.fields[1].config.links?.[0]).toEqual({
+    expect(df.fields[1].config.links!.length).toBe(1);
+    expect(df.fields[1].config.links![0]).toEqual({
       title: '',
       url: '',
       internal: {
@@ -908,6 +916,7 @@ const createElasticQuery = (): DataQueryRequest<ElasticsearchQuery> => {
     dashboardId: 0,
     interval: '',
     panelId: 0,
+    intervalMs: 1,
     scopedVars: {},
     timezone: '',
     app: CoreApp.Dashboard,

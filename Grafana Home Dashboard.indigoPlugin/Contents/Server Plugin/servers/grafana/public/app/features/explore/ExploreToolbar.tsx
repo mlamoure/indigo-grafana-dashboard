@@ -7,9 +7,11 @@ import { css } from 'emotion';
 
 import { ExploreId, ExploreItemState } from 'app/types/explore';
 import { Icon, IconButton, LegacyForms, SetInterval, Tooltip } from '@grafana/ui';
-import { DataQuery, RawTimeRange, TimeRange, TimeZone } from '@grafana/data';
+import { DataQuery, RawTimeRange, TimeRange, TimeZone, AppEvents } from '@grafana/data';
 import { DataSourcePicker } from 'app/core/components/Select/DataSourcePicker';
 import { StoreState } from 'app/types/store';
+import { copyStringToClipboard } from 'app/core/utils/explore';
+import appEvents from 'app/core/app_events';
 import {
   cancelQueries,
   changeDatasource,
@@ -25,6 +27,7 @@ import { getTimeZone } from '../profile/state/selectors';
 import { updateTimeZoneForSession } from '../profile/state/reducers';
 import { getDashboardSrv } from '../dashboard/services/DashboardSrv';
 import kbn from '../../core/utils/kbn';
+import { createShortLink } from './utils/links';
 import { ExploreTimeControls } from './ExploreTimeControls';
 import { LiveTailButton } from './LiveTailButton';
 import { ResponsiveButton } from './ResponsiveButton';
@@ -62,9 +65,9 @@ interface StateProps {
   hasLiveOption: boolean;
   isLive: boolean;
   isPaused: boolean;
-  originPanelId?: number;
+  originPanelId?: number | null;
   queries: DataQuery[];
-  datasourceLoading?: boolean;
+  datasourceLoading?: boolean | null;
   containerWidth: number;
   datasourceName?: string;
 }
@@ -121,7 +124,7 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
 
     if (withChanges) {
       this.props.setDashboardQueriesToUpdateOnLoad({
-        panelId: originPanelId,
+        panelId: originPanelId!,
         queries: this.cleanQueries(queries),
       });
     }
@@ -150,6 +153,16 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
     const { datasourceName } = this.props;
     const exploreDatasources = getExploreDatasources();
     return datasourceName ? exploreDatasources.find(datasource => datasource.name === datasourceName) : undefined;
+  };
+
+  copyAndSaveShortLink = async () => {
+    const shortLink = await createShortLink(window.location.href);
+    if (shortLink) {
+      copyStringToClipboard(shortLink);
+      appEvents.emit(AppEvents.alertSuccess, ['Shortened link copied to clipboard']);
+    } else {
+      appEvents.emit(AppEvents.alertError, ['Error generating shortened link']);
+    }
   };
 
   render() {
@@ -222,7 +235,7 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
                     onChange={this.onChangeDatasource}
                     datasources={getExploreDatasources()}
                     current={this.getSelectedDatasource()}
-                    showLoading={datasourceLoading}
+                    showLoading={datasourceLoading === true}
                     hideTextValue={showSmallDataSourcePicker}
                   />
                 </div>
@@ -262,6 +275,13 @@ export class UnConnectedExploreToolbar extends PureComponent<Props> {
                 />
               </div>
             ) : null}
+            <div className={'explore-toolbar-content-item'}>
+              <Tooltip content={'Copy shortened link'} placement="bottom">
+                <button className={'btn navbar-button'} onClick={this.copyAndSaveShortLink}>
+                  <Icon name="share-alt" />
+                </button>
+              </Tooltip>
+            </div>
             {!isLive && (
               <div className="explore-toolbar-content-item">
                 <ExploreTimeControls

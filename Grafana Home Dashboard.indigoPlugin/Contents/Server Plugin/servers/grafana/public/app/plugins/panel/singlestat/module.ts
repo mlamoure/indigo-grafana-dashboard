@@ -19,11 +19,11 @@ import {
   LegacyResponseData,
   getFlotPairs,
   getDisplayProcessor,
-  getColorFromHexRgbOrName,
   PanelEvents,
   formattedValueToString,
   locationUtil,
   getFieldDisplayName,
+  getColorForTheme,
 } from '@grafana/data';
 
 import { convertOldAngularValueMapping } from '@grafana/ui';
@@ -405,8 +405,9 @@ class SingleStatCtrl extends MetricsPanelCtrl {
 
     function addGauge() {
       const data: ShowData = ctrl.data;
-      const width = elem.width();
-      const height = elem.height();
+      const width = elem.width() || 10;
+      const height = elem.height() || 10;
+
       // Allow to use a bit more space for wide gauges
       const dimension = Math.min(width, height * 1.3);
 
@@ -501,13 +502,15 @@ class SingleStatCtrl extends MetricsPanelCtrl {
 
     function addSparkline() {
       const data: ShowData = ctrl.data;
-      const width = elem.width();
+      const width = elem.width() || 30;
+
       if (width && width < 30) {
         // element has not gotten it's width yet
         // delay sparkline render
         setTimeout(addSparkline, 30);
         return;
       }
+
       if (!data.sparkline || !data.sparkline.length) {
         // no sparkline data
         return;
@@ -539,7 +542,7 @@ class SingleStatCtrl extends MetricsPanelCtrl {
             show: true,
             fill: 1,
             lineWidth: 1,
-            fillColor: getColorFromHexRgbOrName(panel.sparkline.fillColor, config.theme.type),
+            fillColor: getColorForTheme(panel.sparkline.fillColor, config.theme),
             zero: false,
           },
         },
@@ -561,7 +564,7 @@ class SingleStatCtrl extends MetricsPanelCtrl {
 
       const plotSeries = {
         data: data.sparkline,
-        color: getColorFromHexRgbOrName(panel.sparkline.lineColor, config.theme.type),
+        color: getColorForTheme(panel.sparkline.lineColor, config.theme),
       };
 
       $.plot(plotCanvas, [plotSeries], options);
@@ -582,7 +585,7 @@ class SingleStatCtrl extends MetricsPanelCtrl {
 
       // Map panel colors to hex or rgb/a values
       if (panel.colors) {
-        data.colorMap = panel.colors.map((color: string) => getColorFromHexRgbOrName(color, config.theme.type));
+        data.colorMap = panel.colors.map((color: string) => getColorForTheme(color, config.theme));
       }
 
       const body = panel.gauge.show ? '' : getBigValueHtml();

@@ -31,12 +31,13 @@ interface Props {
   data: PanelData;
   query: DataQuery;
   dashboard: DashboardModel;
+  dataSourceValue: string | null;
+  inMixedMode?: boolean;
+  id: string;
+  index: number;
   onAddQuery: (query?: DataQuery) => void;
   onRemoveQuery: (query: DataQuery) => void;
-  onMoveQuery: (query: DataQuery, direction: number) => void;
   onChange: (query: DataQuery) => void;
-  dataSourceValue: string | null;
-  inMixedMode: boolean;
 }
 
 interface State {
@@ -87,12 +88,13 @@ export class QueryEditorRow extends PureComponent<Props, State> {
   }
 
   async loadDatasource() {
-    const { query, panel } = this.props;
+    const { query, panel, dataSourceValue } = this.props;
     const dataSourceSrv = getDatasourceSrv();
     let datasource;
 
     try {
-      datasource = await dataSourceSrv.get(query.datasource || panel.datasource);
+      const datasourceName = dataSourceValue || query.datasource || panel.datasource;
+      datasource = await dataSourceSrv.get(datasourceName);
     } catch (error) {
       datasource = await dataSourceSrv.get();
     }
@@ -178,6 +180,7 @@ export class QueryEditorRow extends PureComponent<Props, State> {
           onChange={onChange}
           onRunQuery={this.onRunQuery}
           data={data}
+          range={getTimeSrv().timeRange()}
         />
       );
     }
@@ -229,7 +232,7 @@ export class QueryEditorRow extends PureComponent<Props, State> {
     const isDisabled = query.hide;
 
     return (
-      <HorizontalGroup>
+      <HorizontalGroup width="auto">
         {hasTextEditMode && (
           <QueryOperationAction
             title="Toggle text edit mode"
@@ -239,13 +242,6 @@ export class QueryEditorRow extends PureComponent<Props, State> {
             }}
           />
         )}
-        <QueryOperationAction
-          title="Move query down"
-          icon="arrow-down"
-          onClick={() => this.props.onMoveQuery(query, 1)}
-        />
-        <QueryOperationAction title="Move query up" icon="arrow-up" onClick={() => this.props.onMoveQuery(query, -1)} />
-
         <QueryOperationAction title="Duplicate query" icon="copy" onClick={this.onCopyQuery} />
         <QueryOperationAction
           title="Disable/enable query"
@@ -261,11 +257,12 @@ export class QueryEditorRow extends PureComponent<Props, State> {
     const { query, inMixedMode } = this.props;
     const { datasource } = this.state;
     const isDisabled = query.hide;
+
     return (
       <QueryEditorRowTitle
         query={query}
         inMixedMode={inMixedMode}
-        datasource={datasource}
+        datasource={datasource!}
         disabled={isDisabled}
         onClick={e => this.onToggleEditMode(e, props)}
         collapsedText={!props.isOpen ? this.renderCollapsedText() : null}
@@ -274,7 +271,7 @@ export class QueryEditorRow extends PureComponent<Props, State> {
   };
 
   render() {
-    const { query } = this.props;
+    const { query, id, index } = this.props;
     const { datasource } = this.state;
     const isDisabled = query.hide;
 
@@ -291,7 +288,14 @@ export class QueryEditorRow extends PureComponent<Props, State> {
 
     return (
       <div aria-label={selectors.components.QueryEditorRows.rows}>
-        <QueryOperationRow title={this.renderTitle} actions={this.renderActions} onOpen={this.onOpen}>
+        <QueryOperationRow
+          id={id}
+          draggable={true}
+          index={index}
+          title={this.renderTitle}
+          actions={this.renderActions}
+          onOpen={this.onOpen}
+        >
           <div className={rowClasses}>
             <ErrorBoundaryAlert>{editor}</ErrorBoundaryAlert>
           </div>
@@ -331,7 +335,7 @@ export interface AngularQueryComponentScope {
   events: Emitter;
   refresh: () => void;
   render: () => void;
-  datasource: DataSourceApi;
+  datasource: DataSourceApi | null;
   toggleEditorMode?: () => void;
   getCollapsedText?: () => string;
   range: TimeRange;

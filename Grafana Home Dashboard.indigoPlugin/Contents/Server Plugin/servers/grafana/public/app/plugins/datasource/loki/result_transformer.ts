@@ -15,9 +15,11 @@ import {
   Field,
   QueryResultMetaStat,
   QueryResultMeta,
+  TimeSeriesValue,
+  ScopedVars,
 } from '@grafana/data';
 
-import templateSrv from 'app/features/templating/template_srv';
+import { getTemplateSrv } from '@grafana/runtime';
 import TableModel from 'app/core/table_model';
 import { formatQuery, getHighlighterExpressionsFromQuery } from './query_utils';
 import {
@@ -154,16 +156,14 @@ function lokiMatrixToTimeSeries(matrixResult: LokiMatrixResult, options: Transfo
   };
 }
 
-function lokiPointsToTimeseriesPoints(
-  data: Array<[number, string]>,
-  options: TransformerOptions
-): Array<[number, number]> {
+function lokiPointsToTimeseriesPoints(data: Array<[number, string]>, options: TransformerOptions): TimeSeriesValue[][] {
   const stepMs = options.step * 1000;
-  const datapoints: Array<[number, number]> = [];
+  const datapoints: TimeSeriesValue[][] = [];
 
   let baseTimestampMs = options.start / 1e6;
   for (const [time, value] of data) {
-    let datapointValue = parseFloat(value);
+    let datapointValue: TimeSeriesValue = parseFloat(value);
+
     if (isNaN(datapointValue)) {
       datapointValue = null;
     }
@@ -198,7 +198,7 @@ export function lokiResultsToTableModel(
 
   // Collect all labels across all metrics
   const metricLabels: Set<string> = new Set<string>(
-    lokiResults.reduce((acc, cur) => acc.concat(Object.keys(cur.metric)), [])
+    lokiResults.reduce((acc, cur) => acc.concat(Object.keys(cur.metric)), [] as string[])
   );
 
   // Sort metric labels, create columns for them and record their index
@@ -241,13 +241,13 @@ export function lokiResultsToTableModel(
   return table;
 }
 
-function createMetricLabel(labelData: { [key: string]: string }, options?: TransformerOptions) {
+export function createMetricLabel(labelData: { [key: string]: string }, options?: TransformerOptions) {
   let label =
     options === undefined || _.isEmpty(options.legendFormat)
       ? getOriginalMetricName(labelData)
-      : renderTemplate(templateSrv.replace(options.legendFormat), labelData);
+      : renderTemplate(getTemplateSrv().replace(options.legendFormat ?? '', options.scopedVars), labelData);
 
-  if (!label) {
+  if (!label && options) {
     label = options.query;
   }
   return label;
@@ -272,11 +272,13 @@ export function decamelize(s: string): string {
 }
 
 // Turn loki stats { metric: value } into meta stat { title: metric, value: value }
-function lokiStatsToMetaStat(stats: LokiStats): QueryResultMetaStat[] {
+function lokiStatsToMetaStat(stats: LokiStats | undefined): QueryResultMetaStat[] {
   const result: QueryResultMetaStat[] = [];
+
   if (!stats) {
     return result;
   }
+
   for (const section in stats) {
     const values = stats[section];
     for (const label in values) {
@@ -293,6 +295,7 @@ function lokiStatsToMetaStat(stats: LokiStats): QueryResultMetaStat[] {
       result.push({ displayName: title, value, unit });
     }
   }
+
   return result;
 }
 
@@ -309,21 +312,40 @@ export function lokiStreamsToDataframes(
   const custom = {
     lokiQueryStatKey: 'Summary: total bytes processed',
   };
+
+  const meta: QueryResultMeta = {
+    searchWords: getHighlighterExpressionsFromQuery(formatQuery(target.expr)),
+    limit,
+    stats,
+    custom,
+    preferredVisualisationType: 'logs',
+  };
+
   const series: DataFrame[] = data.map(stream => {
     const dataFrame = lokiStreamResultToDataFrame(stream, reverse);
     enhanceDataFrame(dataFrame, config);
+
+    if (meta.custom && dataFrame.fields.some(f => f.labels && Object.keys(f.labels).some(l => l === '__error__'))) {
+      meta.custom.error = 'Error when parsing some of the logs';
+    }
+
     return {
       ...dataFrame,
       refId: target.refId,
-      meta: {
-        searchWords: getHighlighterExpressionsFromQuery(formatQuery(target.expr)),
-        limit,
-        stats,
-        custom,
-        preferredVisualisationType: 'logs',
-      },
+      meta,
     };
   });
+
+  if (stats.length && !data.length) {
+    return [
+      {
+        fields: [],
+        length: 0,
+        refId: target.refId,
+        meta,
+      },
+    ];
+  }
 
   return series;
 }
@@ -398,24 +420,25 @@ export function rangeQueryResponseToTimeSeries(
   response: LokiResponse,
   query: LokiRangeQueryRequest,
   target: LokiQuery,
-  responseListLength: number
+  responseListLength: number,
+  scopedVars: ScopedVars
 ): TimeSeries[] {
   /** Show results of Loki metric queries only in graph */
   const meta: QueryResultMeta = {
     preferredVisualisationType: 'graph',
   };
-
   const transformerOptions: TransformerOptions = {
     format: target.format,
-    legendFormat: target.legendFormat,
-    start: query.start,
-    end: query.end,
-    step: query.step,
+    legendFormat: target.legendFormat ?? '',
+    start: query.start!,
+    end: query.end!,
+    step: query.step!,
     query: query.query,
     responseListLength,
     refId: target.refId,
     meta,
     valueWithRefId: target.valueWithRefId,
+    scopedVars,
   };
 
   switch (response.data.resultType) {
@@ -437,6 +460,7 @@ export function processRangeQueryResponse(
   responseListLength: number,
   limit: number,
   config: LokiOptions,
+  scopedVars: ScopedVars,
   reverse = false
 ) {
   switch (response.data.resultType) {
@@ -456,7 +480,8 @@ export function processRangeQueryResponse(
             ...target,
             format: 'time_series',
           },
-          responseListLength
+          responseListLength,
+          scopedVars
         ),
         key: target.refId,
       });
