@@ -18,7 +18,7 @@
   "dependencies": {
     "angular": "^1.7.8",
     "flot": "^3.2.9",
-    "jquery": "^3.4.1",
+    "jquery": "^3.5.0",
     "jquery.flot": "^0.8.3",
     "lodash": "^4.17.15"
   },
