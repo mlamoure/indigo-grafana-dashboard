@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkgrafana=self.webpackChunkgrafana||[]).push([[2001],{"./public/app/plugins/datasource/mixed/module.ts":(a,e,u)=>{u.r(e),u.d(e,{Datasource:()=>s.w,MixedDatasource:()=>s.w});var s=u("./public/app/plugins/datasource/mixed/MixedDataSource.ts")}}]);

@@ -1,7 +1,9 @@
-import React from 'react';
 import { mount } from 'enzyme';
-import { RichHistorySettings, RichHistorySettingsProps } from './RichHistorySettings';
+import React from 'react';
+
 import { Select, Switch } from '@grafana/ui';
+
+import { RichHistorySettings, RichHistorySettingsProps } from './RichHistorySettings';
 
 const setup = (propOverrides?: Partial<RichHistorySettingsProps>) => {
   const props: RichHistorySettingsProps = {
@@ -27,20 +29,10 @@ describe('RichHistorySettings', () => {
   });
   it('should render component with correctly checked starredTabAsFirstTab settings', () => {
     const wrapper = setup();
-    expect(
-      wrapper
-        .find(Switch)
-        .at(0)
-        .prop('value')
-    ).toBe(true);
+    expect(wrapper.find(Switch).at(0).prop('value')).toBe(true);
   });
   it('should render component with correctly not checked toggleactiveDatasourceOnly settings', () => {
     const wrapper = setup();
-    expect(
-      wrapper
-        .find(Switch)
-        .at(1)
-        .prop('value')
-    ).toBe(false);
+    expect(wrapper.find(Switch).at(1).prop('value')).toBe(false);
   });
 });

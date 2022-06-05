@@ -1,11 +1,14 @@
-import React from 'react';
-import { DataTransformerConfig, standardTransformersRegistry } from '@grafana/data';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TransformationsEditor } from './TransformationsEditor';
-import { PanelModel } from '../../state';
-import { getStandardTransformers } from 'app/core/utils/standardTransformers';
+import React from 'react';
+
+import { DataTransformerConfig, standardTransformersRegistry } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
+import { getStandardTransformers } from 'app/features/transformers/standardTransformers';
+
+import { PanelModel } from '../../state';
+
+import { TransformationsEditor } from './TransformationsEditor';
 
 const setup = (transformations: DataTransformerConfig[] = []) => {
   const panel = new PanelModel({});
@@ -51,8 +54,8 @@ describe('TransformationsEditor', () => {
       const addTransformationButton = screen.getByText(buttonLabel);
       userEvent.click(addTransformationButton);
 
-      const picker = screen.getByLabelText(selectors.components.ValuePicker.select(buttonLabel));
-      expect(picker).toBeDefined();
+      const search = screen.getByLabelText(selectors.components.Transforms.searchInput);
+      expect(search).toBeDefined();
     });
   });
 

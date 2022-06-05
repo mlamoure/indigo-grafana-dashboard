@@ -1,19 +1,28 @@
-import { AnnotationQuery, DataQuery } from '@grafana/data';
-import { MeasurementsQuery } from '@grafana/runtime';
+import { DataQuery } from '@grafana/data';
+import { LiveDataFilter } from '@grafana/runtime';
 
 //----------------------------------------------
 // Query
 //----------------------------------------------
 
 export enum GrafanaQueryType {
-  RandomWalk = 'randomWalk',
   LiveMeasurements = 'measurements',
+  Annotations = 'annotations',
+
+  // backend
+  RandomWalk = 'randomWalk',
+  List = 'list',
+  Read = 'read',
+  Search = 'search',
 }
 
 export interface GrafanaQuery extends DataQuery {
   queryType: GrafanaQueryType; // RandomWalk by default
   channel?: string;
-  measurements?: MeasurementsQuery;
+  filter?: LiveDataFilter;
+  buffer?: number;
+  path?: string; // for list and read
+  query?: string; // for query endpoint
 }
 
 export const defaultQuery: GrafanaQuery = {
@@ -30,7 +39,7 @@ export enum GrafanaAnnotationType {
   Tags = 'tags',
 }
 
-export interface GrafanaAnnotationQuery extends AnnotationQuery<GrafanaQuery> {
+export interface GrafanaAnnotationQuery extends GrafanaQuery {
   type: GrafanaAnnotationType; // tags
   limit: number; // 100
   tags?: string[];

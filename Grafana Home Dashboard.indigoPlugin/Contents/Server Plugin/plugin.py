@@ -43,7 +43,7 @@ class InfluxFilter(object):
 		self.maxValue = float(maxValue)
 		self.maxPercent = float(maxPercent)
 		self.allDevices = allDevices
-		self.appliedDevices = map(int, appliedDevices)
+		self.appliedDevices = list(map(int, appliedDevices))
 		self.lockMinimumUpdates = lockMinimumUpdates
 		self.log = log
 
@@ -351,7 +351,7 @@ class Plugin(indigo.PluginBase):
 				if not self.QuietConnectionError:
 					self.logger.error("error while trying to write to InfluxDB... please wait a moment, will work silently to correct in the background")
 					self.QuietConnectionError = True
-					self.logger.debug(unicode(e))
+					self.logger.debug(str(e))
 
 
 	def runConcurrentThread(self):
@@ -775,7 +775,7 @@ class Plugin(indigo.PluginBase):
 		out, err = p.communicate()
 		
 		for line in out.splitlines():
-			if 'grafana' in line:
+			if b'grafana' in line:
 				pid = int(line.split(None, 1)[0])
 				os.kill(pid, signal.SIGKILL)		
 
@@ -1035,7 +1035,7 @@ class Plugin(indigo.PluginBase):
 	def DeviceToInflux(self, origDev, dev, updateCheck = True):
 		# custom add to influx work
 		# tag by folder if present
-		tagnames = u'name folderId'.split()
+		tagnames = 'name folderId'.split()
 
 		# if the device is excluded, do nothing
 		if dev.id in self.DeviceExcludeList:
@@ -1055,7 +1055,7 @@ class Plugin(indigo.PluginBase):
 		# Advanced data filtering processing section
 		if len(self.FilterList) > 0:
 			filterjson = copy.deepcopy(newjson)
-			for kk, vv in filterjson.iteritems():
+			for kk, vv in filterjson.items():
 				for influxFilterRecord in self.FilterList:
 					passedFilter = True
 					try:
@@ -1134,14 +1134,14 @@ class Plugin(indigo.PluginBase):
 
 		newtags = {}
 		for tag in tagnames:
-			newtags[tag] = unicode(getattr(dev, tag))
+			newtags[tag] = str(getattr(dev, tag))
 
 		# add a folder name tag
-		if hasattr(dev, u'folderId') and dev.folderId != 0:
-			newtags[u'folder'] = indigo.devices.folders[dev.folderId].name
+		if hasattr(dev, 'folderId') and dev.folderId != 0:
+			newtags['folder'] = indigo.devices.folders[dev.folderId].name
 
-		measurement = newjson[u'measurement']
-		del newjson[u'measurement']
+		measurement = newjson['measurement']
+		del newjson['measurement']
 		self.SendToInflux(tags=newtags, what=newjson, measurement=measurement)
 
 		return True
@@ -1167,13 +1167,13 @@ class Plugin(indigo.PluginBase):
 		self.VariableToInflux(newVar)
 
 	def VariableToInflux(self, var):
-		newtags = {u'varname': var.name}
-		newjson = {u'name': var.name, u'value': var.value }
+		newtags = {'varname': var.name}
+		newjson = {'name': var.name, 'value': var.value }
 		numval = self.adaptor.smart_value(var.value, True)
 		if numval != None:
-			newjson[u'value.num'] = numval
+			newjson['value.num'] = numval
 
-		self.SendToInflux(tags=newtags, what=newjson, measurement=u'variable_changes')
+		self.SendToInflux(tags=newtags, what=newjson, measurement='variable_changes')
 
 ################### PluginConfig functions. #####################################################
 
@@ -1323,7 +1323,7 @@ class Plugin(indigo.PluginBase):
 		newDeviceIncludeList = []
 		for item in self.DeviceIncludeList:
 			try:
-				if isinstance(item, basestring):
+				if isinstance(item, str):
 					dev_id = int(item)
 				else:
 					dev_id = item
@@ -1368,7 +1368,7 @@ class Plugin(indigo.PluginBase):
 		newDeviceExcludeList = []
 		for item in self.DeviceExcludeList:
 			try:
-				if isinstance(item, basestring):
+				if isinstance(item, str):
 					dev_id = int(item)
 				else:
 					dev_id = item
@@ -1406,7 +1406,7 @@ class Plugin(indigo.PluginBase):
 
 		for dev in indigo.devices:
 			### STATES List
-			for kk, vv in self.adaptor.to_json(dev).iteritems():
+			for kk, vv in self.adaptor.to_json(dev).items():
 				try:
 					index = -1
 					index = [y[0] for y in self.FullStateList].index(kk)
@@ -1613,7 +1613,7 @@ class Plugin(indigo.PluginBase):
 			self.logger.info("   the device: \"" + dev.name + "\" is not excluded from updates to InfluxDB, but it contains no states/properties that are capable of being sent to Influx/Grafana.")			
 
 		else:
-			for kk, vv in sorted(newjson.iteritems()):
+			for kk, vv in sorted(newjson.items()):
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 					if (kk in self.StatesIncludeList or included) and not excluded:
 						status = " (INCLUDED)"
@@ -1627,7 +1627,7 @@ class Plugin(indigo.PluginBase):
 
 					if isinstance(vv, str):
 						value = vv
-					elif isinstance(vv, unicode):
+					elif isinstance(vv, str):
 						value = vv.encode('utf-8')
 					else:
 						value = str(vv)
@@ -1647,7 +1647,7 @@ class Plugin(indigo.PluginBase):
 				excluded = True
 
 			### STATES List
-			for kk, vv in self.adaptor.to_json(dev).iteritems():
+			for kk, vv in self.adaptor.to_json(dev).items():
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 					if kk == searchKey:
 						if kk in self.StatesIncludeList and not excluded:
@@ -1662,7 +1662,7 @@ class Plugin(indigo.PluginBase):
 
 						if isinstance(vv, str):
 							value = vv
-						elif isinstance(vv, unicode):
+						elif isinstance(vv, str):
 							value = vv.encode('utf-8')
 						else:
 							value = str(vv)

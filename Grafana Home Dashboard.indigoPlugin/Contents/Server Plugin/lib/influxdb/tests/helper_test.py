@@ -47,6 +47,14 @@ class TestSeriesHelper(unittest.TestCase):
 
         TestSeriesHelper.MySeriesHelper = MySeriesHelper
 
+    def setUp(self):
+        """Check that MySeriesHelper has empty datapoints."""
+        super(TestSeriesHelper, self).setUp()
+        self.assertEqual(
+            TestSeriesHelper.MySeriesHelper._json_body_(),
+            [],
+            'Resetting helper in teardown did not empty datapoints.')
+
     def tearDown(self):
         """Deconstruct the TestSeriesHelper object."""
         super(TestSeriesHelper, self).tearDown()
@@ -310,8 +318,19 @@ class TestSeriesHelper(unittest.TestCase):
 
                 series_name = 'events.stats.{server_name}'
 
+        class InvalidTimePrecision(SeriesHelper):
+            """Define instance of SeriesHelper for invalid time precision."""
+
+            class Meta:
+                """Define metadata for InvalidTimePrecision."""
+
+                series_name = 'events.stats.{server_name}'
+                time_precision = "ks"
+                fields = ['time', 'server_name']
+                autocommit = True
+
         for cls in [MissingMeta, MissingClient, MissingFields,
-                    MissingSeriesName]:
+                    MissingSeriesName, InvalidTimePrecision]:
             self.assertRaises(
                 AttributeError, cls, **{'time': 159,
                                         'server_name': 'us.east-1'})
@@ -365,3 +384,54 @@ class TestSeriesHelper(unittest.TestCase):
                              .format(WarnBulkSizeNoEffect))
             self.assertIn('has no affect', str(w[-1].message),
                           'Warning message did not contain "has not affect".')
+
+    def testSeriesWithRetentionPolicy(self):
+        """Test that the data is saved with the specified retention policy."""
+        my_policy = 'my_policy'
+
+        class RetentionPolicySeriesHelper(SeriesHelper):
+
+            class Meta:
+                client = InfluxDBClient()
+                series_name = 'events.stats.{server_name}'
+                fields = ['some_stat', 'time']
+                tags = ['server_name', 'other_tag']
+                bulk_size = 2
+                autocommit = True
+                retention_policy = my_policy
+
+        fake_write_points = mock.MagicMock()
+        RetentionPolicySeriesHelper(
+            server_name='us.east-1', some_stat=159, other_tag='gg')
+        RetentionPolicySeriesHelper._client.write_points = fake_write_points
+        RetentionPolicySeriesHelper(
+            server_name='us.east-1', some_stat=158, other_tag='aa')
+
+        kall = fake_write_points.call_args
+        args, kwargs = kall
+        self.assertTrue('retention_policy' in kwargs)
+        self.assertEqual(kwargs['retention_policy'], my_policy)
+
+    def testSeriesWithoutRetentionPolicy(self):
+        """Test that the data is saved without any retention policy."""
+        class NoRetentionPolicySeriesHelper(SeriesHelper):
+
+            class Meta:
+                client = InfluxDBClient()
+                series_name = 'events.stats.{server_name}'
+                fields = ['some_stat', 'time']
+                tags = ['server_name', 'other_tag']
+                bulk_size = 2
+                autocommit = True
+
+        fake_write_points = mock.MagicMock()
+        NoRetentionPolicySeriesHelper(
+            server_name='us.east-1', some_stat=159, other_tag='gg')
+        NoRetentionPolicySeriesHelper._client.write_points = fake_write_points
+        NoRetentionPolicySeriesHelper(
+            server_name='us.east-1', some_stat=158, other_tag='aa')
+
+        kall = fake_write_points.call_args
+        args, kwargs = kall
+        self.assertTrue('retention_policy' in kwargs)
+        self.assertEqual(kwargs['retention_policy'], None)

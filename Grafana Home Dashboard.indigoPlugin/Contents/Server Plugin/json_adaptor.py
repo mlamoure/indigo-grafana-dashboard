@@ -15,7 +15,7 @@ def indigo_json_serial(obj):
 		return int(ut)
 	if isinstance(obj, indigo.Dict):
 		dd = {}
-		for key,value in obj.iteritems():
+		for key,value in obj.items():
 			dd[key] = value
 		return dd
 	raise TypeError ("Type %s not serializable" % type(obj))
@@ -46,8 +46,8 @@ class JSONAdaptor():
 	# possible
 	def smart_value(self, invalue, mknumbers=False):
 		value = None
-		if unicode(invalue) != u"null" \
-			and unicode(invalue) != u"None" \
+		if str(invalue) != "null" \
+			and str(invalue) != "None" \
 			and not isinstance(invalue, indigo.List) \
 			and not isinstance(invalue, list) \
 			and not isinstance(invalue, indigo.Dict) \
@@ -62,7 +62,7 @@ class JSONAdaptor():
 						value = None
 					# if we have a string, but it really is a number,
 					# MAKE IT A NUMBER IDIOTS
-					elif isinstance(invalue, basestring):
+					elif isinstance(invalue, str):
 						value = float(invalue)
 					elif isinstance(invalue, int):
 						value = float(invalue)
@@ -79,7 +79,7 @@ class JSONAdaptor():
 				# explicitly change enum values to strings
 				# TODO find a more reliable way to change enums to strings
 				elif invalue.__class__.__bases__[0].__name__ == 'enum':
-					value = unicode(invalue)
+					value = str(invalue)
 			except ValueError:
 				if mknumbers:
 					# if we were trying to force numbers but couldn't
@@ -92,11 +92,11 @@ class JSONAdaptor():
 					attr[:2] + attr[-2:] != '____' and not callable(getattr(device, attr))]
 		#indigo.server.log(device.name + ' ' + ' '.join(attrlist))
 		newjson = {}
-		newjson[u'name'] = unicode(device.name)
+		newjson['name'] = str(device.name)
 		for key in attrlist:
 			#import pdb; pdb.set_trace()
 			if hasattr(device, key) \
-				and key not in newjson.keys():
+				and key not in list(newjson.keys()):
 				val = self.smart_value(getattr(device, key), False);
 				# some things change types - define the original name as original type, key.num as numeric
 				if val != None:
@@ -111,38 +111,38 @@ class JSONAdaptor():
 		# dicts end enums will not upload without a little abuse
 		for key in 'states globalProps pluginProps ' \
 			'ownerProps'.split():
-			if key in newjson.keys():
+			if key in list(newjson.keys()):
 				del newjson[key]
 
-		for key in newjson.keys():
+		for key in list(newjson.keys()):
 			if newjson[key].__class__.__name__.startswith('k'):
-				newjson[key] = unicode(newjson[key])
+				newjson[key] = str(newjson[key])
 
 		for key in self.stringonly:
-			if key in newjson.keys():
-				newjson[key] = unicode(newjson[key])
+			if key in list(newjson.keys()):
+				newjson[key] = str(newjson[key])
 
 		for state in device.states:
 			val = self.smart_value(device.states[state], False);
 			if val != None:
-				newjson[unicode('state.' + state)] = val
+				newjson[str('state.' + state)] = val
 			if state in self.stringonly:
 				continue
 			val = self.smart_value(device.states[state], True);
 			if val != None:
-				newjson[unicode('state.' + state + '.num')] = val
+				newjson[str('state.' + state + '.num')] = val
 
 		# Try to tell the caller what kind of measurement this is
-		if u'setpointHeat' in device.states.keys():
-			newjson[u'measurement'] = u'thermostat_changes'
-		elif device.model == u'Weather Station':
-			newjson[u'measurement'] = u'weather_changes'
+		if 'setpointHeat' in list(device.states.keys()):
+			newjson['measurement'] = 'thermostat_changes'
+		elif device.model == 'Weather Station':
+			newjson['measurement'] = 'weather_changes'
 		else:
-			newjson[u'measurement'] = u'device_changes'
+			newjson['measurement'] = 'device_changes'
 
 		# try to honor previous complaints about column types
-		for key in self.typecache.keys():
-			if key in newjson.keys():
+		for key in list(self.typecache.keys()):
+			if key in list(newjson.keys()):
 				try:
 					newjson[key] = eval( '%s("%s")' % (self.typecache[key], str(newjson[key])))
 				except ValueError:
@@ -163,19 +163,19 @@ class JSONAdaptor():
 			self.logger.debug("currently in: diff_to_json for " + device.name)
 
 		localcache = {}
-		if device.name in self.cache.keys():
+		if device.name in list(self.cache.keys()):
 			localcache = self.cache[device.name]
 
 		diffjson = {}
 		hasUpdate = False
-		for kk, vv in newjson.iteritems():
+		for kk, vv in newjson.items():
 
 			# Check if it's changed
 			if kk not in localcache or localcache[kk] != vv or not updateCheck:
 
 				if updateCheck:
 					try:
-						if kk in localcache and isinstance(vv, basestring) and (str(localcache[kk]).encode('utf-8').lower() == str(vv).encode('utf-8').lower() or len(str(vv).encode('utf-8')) == 0):
+						if kk in localcache and isinstance(vv, str) and (str(localcache[kk]).encode('utf-8').lower() == str(vv).encode('utf-8').lower() or len(str(vv).encode('utf-8')) == 0):
 							if self.TransportDebugL2:
 								self.logger.debug('NOT sending property: ' + kk + " to InfluxDB for device: " + device.name + " because the value NOT has changed.  Prev value: " + str(localcache[kk]) + ", new value: " + str(vv))
 
@@ -205,18 +205,18 @@ class JSONAdaptor():
 
 			return None
 			
-		if not device.name in self.cache.keys():
+		if not device.name in list(self.cache.keys()):
 			self.cache[device.name] = {}
 		self.cache[device.name].update(newjson)
 
 		# always make sure these survive
 		diffjson['name'] = device.name
 		diffjson['id'] = float(device.id)
-		diffjson[u'measurement'] = newjson[u'measurement']
+		diffjson['measurement'] = newjson['measurement']
 
 		if self.JSONDebug:
 			self.logger.debug(json.dumps(newjson, default=indigo_json_serial).encode('utf-8'))
-			self.logger.debug(u'diff:')
+			self.logger.debug('diff:')
 			self.logger.debug(json.dumps(diffjson, default=indigo_json_serial).encode('utf-8'))
 
 		return diffjson

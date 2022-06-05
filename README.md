@@ -6,7 +6,7 @@ Both InfluxDB and Grafana are included within the plugin, nothing is installed o
 
 # Features #
 * Built-in InfluxDB and Grafana servers
-* Latest Influx client libraries
+* InfluxDB client libraries for Influx 1.7.  NOTE: InfluxDB 1.8, 2.0+ will not work with this plugin
 * Granular control of inclusion and exclusion criteria to control which devices, and what states, are sent to InfluxDB and Grafana (dependency on Global Property Manager from previous versions is removed)
 * Filtering - advanced configuration allows the creation of filters to prevent values outside of ranges, or sudden changes, from being sent to Influx and messing up your pretty graphs.
 * Utility functions to output the JSON of any device, or to investigate which devices are publishing any particular property.  This takes the guessing work out of your Grafana queries.
@@ -19,6 +19,7 @@ Both InfluxDB and Grafana are included within the plugin, nothing is installed o
 * OS X 10.8 or higher
 Be aware of the system requirements for InfluxDB.
 * InfluxDB System Requirements - [https://docs.influxdata.com/influxdb/v1.5/guides/hardware_sizing/]
+* M1 Macs should be able to run the plugin, and the Grafana server.  However, the InfluxDB Server may not run (untested)
 
 # Support #
 * Indigo forums - [http://forums.indigodomo.com/viewforum.php?f=279&sid=8325f6e661b0bea59f44b6989402f6c5]

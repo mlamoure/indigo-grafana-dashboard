@@ -10,6 +10,7 @@ import math
 from collections import defaultdict
 
 import pandas as pd
+import numpy as np
 
 from .client import InfluxDBClient
 from .line_protocol import _escape_tag
@@ -58,6 +59,8 @@ class DataFrameClient(InfluxDBClient):
         :param dataframe: data points in a DataFrame
         :param measurement: name of measurement
         :param tags: dictionary of tags, with string key-values
+        :param tag_columns: [Optional, default None] List of data tag names
+        :param field_columns: [Options, default None] List of data field names
         :param time_precision: [Optional, default None] Either 's', 'ms', 'u'
             or 'n'.
         :param batch_size: [Optional] Value to write the points in batches
@@ -141,18 +144,31 @@ class DataFrameClient(InfluxDBClient):
     def query(self,
               query,
               params=None,
+              bind_params=None,
               epoch=None,
               expected_response_code=200,
               database=None,
               raise_errors=True,
               chunked=False,
               chunk_size=0,
-              dropna=True):
+              method="GET",
+              dropna=True,
+              data_frame_index=None):
         """
-        Quering data into a DataFrame.
+        Query data into a DataFrame.
+
+        .. danger::
+            In order to avoid injection vulnerabilities (similar to `SQL
+            injection <https://www.owasp.org/index.php/SQL_Injection>`_
+            vulnerabilities), do not directly include untrusted data into the
+            ``query`` parameter, use ``bind_params`` instead.
 
         :param query: the actual query string
         :param params: additional parameters for the request, defaults to {}
+        :param bind_params: bind parameters for the query:
+            any variable in the query written as ``'$var_name'`` will be
+            replaced with ``bind_params['var_name']``. Only works in the
+            ``WHERE`` clause and takes precedence over ``params['params']``
         :param epoch: response timestamps to be in epoch format either 'h',
             'm', 's', 'ms', 'u', or 'ns',defaults to `None` which is
             RFC3339 UTC format with nanosecond precision
@@ -166,28 +182,35 @@ class DataFrameClient(InfluxDBClient):
             containing all results within that chunk
         :param chunk_size: Size of each chunk to tell InfluxDB to use.
         :param dropna: drop columns where all values are missing
+        :param data_frame_index: the list of columns that
+            are used as DataFrame index
         :returns: the queried data
         :rtype: :class:`~.ResultSet`
         """
         query_args = dict(params=params,
+                          bind_params=bind_params,
                           epoch=epoch,
                           expected_response_code=expected_response_code,
                           raise_errors=raise_errors,
                           chunked=chunked,
+                          database=database,
+                          method=method,
                           chunk_size=chunk_size)
         results = super(DataFrameClient, self).query(query, **query_args)
         if query.strip().upper().startswith("SELECT"):
             if len(results) > 0:
-                return self._to_dataframe(results, dropna)
+                return self._to_dataframe(results, dropna,
+                                          data_frame_index=data_frame_index)
             else:
                 return {}
         else:
             return results
 
-    def _to_dataframe(self, rs, dropna=True):
+    def _to_dataframe(self, rs, dropna=True, data_frame_index=None):
         result = defaultdict(list)
         if isinstance(rs, list):
-            return map(self._to_dataframe, rs)
+            return map(self._to_dataframe, rs,
+                       [dropna for _ in range(len(rs))])
 
         for key, data in rs.items():
             name, tags = key
@@ -197,9 +220,15 @@ class DataFrameClient(InfluxDBClient):
                 key = (name, tuple(sorted(tags.items())))
             df = pd.DataFrame(data)
             df.time = pd.to_datetime(df.time)
-            df.set_index('time', inplace=True)
-            df.index = df.index.tz_localize('UTC')
-            df.index.name = None
+
+            if data_frame_index:
+                df.set_index(data_frame_index, inplace=True)
+            else:
+                df.set_index('time', inplace=True)
+                if df.index.tzinfo is None:
+                    df.index = df.index.tz_localize('UTC')
+                df.index.name = None
+
             result[key].append(df)
         for key, data in result.items():
             df = pd.concat(data).sort_index()
@@ -234,7 +263,8 @@ class DataFrameClient(InfluxDBClient):
             field_columns = list(
                 set(dataframe.columns).difference(set(tag_columns)))
 
-        dataframe.index = dataframe.index.to_datetime()
+        if not isinstance(dataframe.index, pd.DatetimeIndex):
+            dataframe.index = pd.to_datetime(dataframe.index)
         if dataframe.index.tzinfo is None:
             dataframe.index = dataframe.index.tz_localize('UTC')
 
@@ -253,14 +283,31 @@ class DataFrameClient(InfluxDBClient):
             "h": 1e9 * 3600,
         }.get(time_precision, 1)
 
+        if not tag_columns:
+            points = [
+                {'measurement': measurement,
+                 'fields':
+                    rec.replace([np.inf, -np.inf], np.nan).dropna().to_dict(),
+                 'time': np.int64(ts.value / precision_factor)}
+                for ts, (_, rec) in zip(
+                    dataframe.index,
+                    dataframe[field_columns].iterrows()
+                )
+            ]
+
+            return points
+
         points = [
             {'measurement': measurement,
              'tags': dict(list(tag.items()) + list(tags.items())),
-             'fields': rec,
-             'time': int(ts.value / precision_factor)}
-            for ts, tag, rec in zip(dataframe.index,
-                                    dataframe[tag_columns].to_dict('record'),
-                                    dataframe[field_columns].to_dict('record'))
+             'fields':
+                rec.replace([np.inf, -np.inf], np.nan).dropna().to_dict(),
+             'time': np.int64(ts.value / precision_factor)}
+            for ts, tag, (_, rec) in zip(
+                dataframe.index,
+                dataframe[tag_columns].to_dict('record'),
+                dataframe[field_columns].iterrows()
+            )
         ]
 
         return points
@@ -274,6 +321,10 @@ class DataFrameClient(InfluxDBClient):
                                     time_precision=None,
                                     numeric_precision=None):
 
+        dataframe = dataframe.dropna(how='all').copy()
+        if len(dataframe) == 0:
+            return []
+
         if not isinstance(dataframe, pd.DataFrame):
             raise TypeError('Must be DataFrame, but type was: {0}.'
                             .format(type(dataframe)))
@@ -282,6 +333,8 @@ class DataFrameClient(InfluxDBClient):
             raise TypeError('Must be DataFrame with DatetimeIndex or '
                             'PeriodIndex.')
 
+        dataframe = dataframe.rename(
+            columns={item: _escape_tag(item) for item in dataframe.columns})
         # Create a Series of columns for easier indexing
         column_series = pd.Series(dataframe.columns)
 
@@ -319,11 +372,11 @@ class DataFrameClient(InfluxDBClient):
 
         # Make array of timestamp ints
         if isinstance(dataframe.index, pd.PeriodIndex):
-            time = ((dataframe.index.to_timestamp().values.astype(int) /
-                     precision_factor).astype(int).astype(str))
+            time = ((dataframe.index.to_timestamp().values.astype(np.int64) /
+                     precision_factor).astype(np.int64).astype(str))
         else:
-            time = ((pd.to_datetime(dataframe.index).values.astype(int) /
-                     precision_factor).astype(int).astype(str))
+            time = ((pd.to_datetime(dataframe.index).values.astype(np.int64) /
+                     precision_factor).astype(np.int64).astype(str))
 
         # If tag columns exist, make an array of formatted tag keys and values
         if tag_columns:
@@ -340,7 +393,7 @@ class DataFrameClient(InfluxDBClient):
             tag_df = self._stringify_dataframe(
                 tag_df, numeric_precision, datatype='tag')
 
-            # join preprendded tags, leaving None values out
+            # join prepended tags, leaving None values out
             tags = tag_df.apply(
                 lambda s: [',' + s.name + '=' + v if v else '' for v in s])
             tags = tags.sum(axis=1)
@@ -348,7 +401,8 @@ class DataFrameClient(InfluxDBClient):
             del tag_df
         elif global_tags:
             tag_string = ''.join(
-                [",{}={}".format(k, _escape_tag(v)) if v else ''
+                [",{}={}".format(k, _escape_tag(v))
+                 if v not in [None, ''] else ""
                  for k, v in sorted(global_tags.items())]
             )
             tags = pd.Series(tag_string, index=dataframe.index)
@@ -356,21 +410,31 @@ class DataFrameClient(InfluxDBClient):
             tags = ''
 
         # Make an array of formatted field keys and values
-        field_df = dataframe[field_columns]
+        field_df = dataframe[field_columns].replace([np.inf, -np.inf], np.nan)
+        nans = pd.isnull(field_df)
+
         field_df = self._stringify_dataframe(field_df,
                                              numeric_precision,
                                              datatype='field')
+
         field_df = (field_df.columns.values + '=').tolist() + field_df
         field_df[field_df.columns[1:]] = ',' + field_df[field_df.columns[1:]]
-        fields = field_df.sum(axis=1)
+        field_df[nans] = ''
+
+        fields = field_df.sum(axis=1).map(lambda x: x.lstrip(','))
         del field_df
 
         # Generate line protocol string
+        measurement = _escape_tag(measurement)
         points = (measurement + tags + ' ' + fields + ' ' + time).tolist()
         return points
 
     @staticmethod
     def _stringify_dataframe(dframe, numeric_precision, datatype='field'):
+
+        # Prevent modification of input dataframe
+        dframe = dframe.copy()
+
         # Find int and string columns for field-type data
         int_columns = dframe.select_dtypes(include=['integer']).columns
         string_columns = dframe.select_dtypes(include=['object']).columns
@@ -414,6 +478,7 @@ class DataFrameClient(InfluxDBClient):
             dframe = dframe.apply(_escape_pandas_series)
 
         dframe.columns = dframe.columns.astype(str)
+
         return dframe
 
     def _datetime_to_epoch(self, datetime, time_precision='s'):

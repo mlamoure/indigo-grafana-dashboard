@@ -1,4 +1,5 @@
 import React, { FC } from 'react';
+
 import { Tooltip, Icon } from '@grafana/ui';
 import { LdapRole } from 'app/types';
 
@@ -8,7 +9,7 @@ interface Props {
 }
 
 export const LdapUserGroups: FC<Props> = ({ groups, showAttributeMapping }) => {
-  const items = showAttributeMapping ? groups : groups.filter(item => item.orgRole);
+  const items = showAttributeMapping ? groups : groups.filter((item) => item.orgRole);
 
   return (
     <div className="gf-form-group">

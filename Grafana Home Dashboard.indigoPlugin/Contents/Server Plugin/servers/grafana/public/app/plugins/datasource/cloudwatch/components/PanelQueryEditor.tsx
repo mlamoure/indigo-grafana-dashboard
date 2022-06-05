@@ -1,19 +1,14 @@
 import React, { PureComponent } from 'react';
-import pick from 'lodash/pick';
-import { ExploreQueryFieldProps, ExploreMode } from '@grafana/data';
-import { Segment } from '@grafana/ui';
-import { CloudWatchQuery } from '../types';
+
+import { QueryEditorProps, ExploreMode } from '@grafana/data';
+
 import { CloudWatchDatasource } from '../datasource';
-import { QueryInlineField } from './';
-import { MetricsQueryEditor } from './MetricsQueryEditor';
+import { CloudWatchJsonData, CloudWatchQuery } from '../types';
+
 import LogsQueryEditor from './LogsQueryEditor';
+import { MetricsQueryEditor } from './MetricsQueryEditor';
 
-export type Props = ExploreQueryFieldProps<CloudWatchDatasource, CloudWatchQuery>;
-
-const apiModes = {
-  Metrics: { label: 'CloudWatch Metrics', value: 'Metrics' },
-  Logs: { label: 'CloudWatch Logs', value: 'Logs' },
-};
+export type Props = QueryEditorProps<CloudWatchDatasource, CloudWatchQuery, CloudWatchJsonData>;
 
 export class PanelQueryEditor extends PureComponent<Props> {
   render() {
@@ -22,33 +17,6 @@ export class PanelQueryEditor extends PureComponent<Props> {
 
     return (
       <>
-        <QueryInlineField label="Query Mode">
-          <Segment
-            value={apiModes[apiMode]}
-            options={Object.values(apiModes)}
-            onChange={({ value }) => {
-              const newMode = (value as 'Metrics' | 'Logs') ?? 'Metrics';
-              if (newMode !== apiModes[apiMode].value) {
-                const commonProps = pick(
-                  query,
-                  'id',
-                  'region',
-                  'namespace',
-                  'refId',
-                  'hide',
-                  'key',
-                  'queryType',
-                  'datasource'
-                );
-
-                this.props.onChange({
-                  ...commonProps,
-                  queryMode: newMode,
-                } as CloudWatchQuery);
-              }
-            }}
-          />
-        </QueryInlineField>
         {apiMode === ExploreMode.Logs ? (
           <LogsQueryEditor {...this.props} allowCustomValue />
         ) : (

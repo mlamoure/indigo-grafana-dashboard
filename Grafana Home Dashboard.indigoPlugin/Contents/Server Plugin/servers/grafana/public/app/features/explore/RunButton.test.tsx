@@ -1,12 +1,14 @@
-import React from 'react';
-import { RunButton, Props } from './RunButton';
-import { RefreshPicker } from '@grafana/ui';
 import { shallow } from 'enzyme';
+import React from 'react';
+
+import { RefreshPicker } from '@grafana/ui';
 import { getTimeSrv, TimeSrv } from 'app/features/dashboard/services/TimeSrv';
+
+import { RunButton, Props } from './RunButton';
 
 const setup = (propOverrides?: object) => {
   const props: Props = {
-    splitted: false,
+    isSmall: false,
     loading: false,
     isLive: false,
     onRun: jest.fn(),
@@ -29,7 +31,7 @@ jest.mock('app/features/dashboard/services/TimeSrv', () => ({
     },
   }),
 }));
-const getTimeSrvMock = (getTimeSrv as any) as jest.Mock<TimeSrv>;
+const getTimeSrvMock = getTimeSrv as any as jest.Mock<TimeSrv>;
 
 beforeEach(() => {
   getTimeSrvMock.mockClear();

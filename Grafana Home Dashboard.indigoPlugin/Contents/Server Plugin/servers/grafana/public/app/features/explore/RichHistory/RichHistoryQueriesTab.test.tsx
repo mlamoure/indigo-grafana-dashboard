@@ -1,9 +1,12 @@
-import React from 'react';
 import { mount } from 'enzyme';
-import { ExploreId } from '../../../types/explore';
+import React from 'react';
+
+import { RangeSlider } from '@grafana/ui';
 import { SortOrder } from 'app/core/utils/richHistory';
+
+import { ExploreId } from '../../../types/explore';
+
 import { RichHistoryQueriesTab, Props } from './RichHistoryQueriesTab';
-import { Slider } from '@grafana/ui';
 
 jest.mock('../state/selectors', () => ({ getExploreDatasources: jest.fn() }));
 
@@ -12,7 +15,7 @@ const setup = (propOverrides?: Partial<Props>) => {
     queries: [],
     sortOrder: SortOrder.Ascending,
     activeDatasourceOnly: false,
-    datasourceFilters: null,
+    datasourceFilters: [],
     retentionPeriod: 14,
     height: 100,
     exploreId: ExploreId.left,
@@ -30,22 +33,12 @@ describe('RichHistoryQueriesTab', () => {
   describe('slider', () => {
     it('should render slider', () => {
       const wrapper = setup();
-      expect(wrapper.find(Slider)).toHaveLength(1);
+      expect(wrapper.find(RangeSlider)).toHaveLength(1);
     });
     it('should render slider with correct timerange', () => {
       const wrapper = setup();
-      expect(
-        wrapper
-          .find('.label-slider')
-          .at(1)
-          .text()
-      ).toEqual('today');
-      expect(
-        wrapper
-          .find('.label-slider')
-          .at(2)
-          .text()
-      ).toEqual('two weeks ago');
+      expect(wrapper.find('.label-slider').at(1).text()).toEqual('today');
+      expect(wrapper.find('.label-slider').at(2).text()).toEqual('two weeks ago');
     });
   });
 

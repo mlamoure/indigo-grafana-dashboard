@@ -1,0 +1,140 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+  <meta name="viewport" content="width=device-width"/>
+  <!-- build:css css/tidy.css -->
+  <link inline rel="stylesheet" href="../assets/css/ink.css"/>
+  <link inline rel="stylesheet" href="../assets/css/style.css"/>
+  <!-- /build -->
+</head>
+
+<body class="main"
+      style="background: white; display: flex; flex-direction: column; align-items: center;border-spacing: 0;">
+
+
+<table class="body"
+       style="background: white; display: flex; flex-direction: column; align-items: center; border: 1px solid #dce1e6; margin: 0 auto; border-spacing: 0;">
+  <tbody style="margin: 0 auto;">
+  <tr>
+    <td class="center" align="center" valign="top" style="padding: 0;">
+      <center>
+        <table class="row header"
+               style="padding: 30px 0;display: flex;justify-content: center; background: white; border-spacing: 0;">
+          <tbody style="margin: 0 auto;background: white;">
+          <tr style="background: white;">
+            <td class="center" align="center">
+              <center>
+                <table class="container" style="border-spacing: 0;">
+                  <tbody style="margin: 0 auto;">
+                  <tr>
+                    <td class="wrapper last">
+                      <table class="twelve columns">
+                        <tr>
+                          <td class="twelve sub-columns center">
+                            <img class="logo" src="{{.Logo}}"
+                                 style=" max-width: 340px;float: none; display: inline;"/>
+                          </td>
+                          <td class="expander"></td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                  </tbody>
+                </table>
+              </center>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+
+        <table class="container" style="background: white;">
+          <tr>
+          </tr>
+          <tr>
+            <td
+              class="mini-centered-text"
+              style="
+              color: #343b41;
+              font: 400 16px/27px 'Helvetica Neue', Helvetica, Arial, sans-serif;
+              mso-table-lspace: 0pt;
+              mso-table-rspace: 0pt;
+              padding: 25px 35px;
+              text-align: center;
+              vertical-align: top;
+            "
+              align="center"
+              valign="top"
+            >
+              <!-- This email is for the report feature -->
+
+              {{Subject .Subject "{{.Name}}"}}
+
+              <table class="row" style="background: white;">
+                <tr style="background: white;">
+                  <td class="wrapper last" style="background: white;">
+                    <table class="twelve columns" style="background: white;">
+                      <tr style="background: white;">
+                        <td style="background: white;">
+                          <h4 style="white-space: pre-line; text-align: left; font-weight: normal;color: #343b41; ">
+                            {{.Message}}</h4>
+                          <div style="text-align: center; font-size: 12px; color: #343b41;">
+                            {{if .EnableDashboardURL}}
+                            <a style="display: inline-flex;
+                                      align-items: center;
+                                      font-weight: 500;
+                                      font-size: 14px;
+                                      padding: 0px 16px;
+                                      height: 32px;
+                                      line-height: 30px;
+                                      vertical-align: middle;
+                                      cursor: pointer;
+                                      border: 1px solid rgb(50, 116, 217);
+                                      border-radius: 2px;
+                                      background: linear-gradient(rgb(50, 116, 217) 0%, rgb(31, 96, 196) 100%);
+                                      color: rgb(255, 255, 255);
+                                      text-decoration: none;"
+                               href="{{.DashboardURL}}">View dashboard</a>
+                            {{end}}
+                          </div>
+                        </td>
+                        <td class="expander"></td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <!-- container end below -->
+            </td>
+          </tr>
+        </table>
+        <!-- footer -->
+        <table class="footer center"
+               style="display: flex;justify-content: center; border-spacing: 0; background: #fff; {{if .SentBy}}border-top: 1px solid #dce1e6;{{end}}">
+          <tbody style="border-spacing: 0; margin: 0 auto;">
+          <tr>
+            <td class="wrapper last" style="padding: 0;">
+              <table class="twelve columns center">
+                <tr>
+                  <td class="twelve" align="center">
+                    <center>
+                      <p style="text-align: center; font-size: 12px; color: #343b41;">
+                        {{if .SentBy}} Sent by <a href="{{.FooterLink}}">{{.FooterText}}</a>
+                        {{end}}
+                      </p>
+                    </center>
+                  </td>
+                  <td class="expander"></td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+      </center>
+    </td>
+  </tr>
+  </tbody>
+</table>
+</body>
+</html>

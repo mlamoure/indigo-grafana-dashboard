@@ -1,28 +1,116 @@
-import _ from 'lodash';
+import { cloneDeep, extend, get, groupBy, has, isString, map as _map, omit, pick, reduce } from 'lodash';
+import { lastValueFrom, Observable, of, throwError } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
+import { v4 as uuidv4 } from 'uuid';
 
 import {
-  dateMath,
-  DataSourceInstanceSettings,
-  ScopedVars,
+  AnnotationEvent,
+  ArrayVector,
+  DataFrame,
+  DataQueryError,
   DataQueryRequest,
   DataQueryResponse,
+  DataSourceInstanceSettings,
+  dateMath,
   dateTime,
+  FieldType,
   LoadingState,
-  QueryResultMeta,
   MetricFindValue,
+  QueryResultMeta,
+  ScopedVars,
+  TIME_SERIES_TIME_FIELD_NAME,
+  TIME_SERIES_VALUE_FIELD_NAME,
+  TimeSeries,
   AnnotationQueryRequest,
-  AnnotationEvent,
 } from '@grafana/data';
-import { v4 as uuidv4 } from 'uuid';
-import InfluxSeries from './influx_series';
-import InfluxQueryModel from './influx_query_model';
-import ResponseParser from './response_parser';
-import { InfluxQueryBuilder } from './query_builder';
-import { InfluxQuery, InfluxOptions, InfluxVersion } from './types';
+import {
+  BackendDataSourceResponse,
+  DataSourceWithBackend,
+  FetchResponse,
+  frameToMetricFindValue,
+  getBackendSrv,
+} from '@grafana/runtime';
+import config from 'app/core/config';
 import { getTemplateSrv, TemplateSrv } from 'app/features/templating/template_srv';
-import { getBackendSrv, DataSourceWithBackend, frameToMetricFindValue } from '@grafana/runtime';
-import { Observable, from } from 'rxjs';
+
 import { FluxQueryEditor } from './components/FluxQueryEditor';
+import InfluxQueryModel from './influx_query_model';
+import InfluxSeries from './influx_series';
+import { buildRawQuery } from './queryUtils';
+import { InfluxQueryBuilder } from './query_builder';
+import ResponseParser from './response_parser';
+import { InfluxOptions, InfluxQuery, InfluxVersion } from './types';
+
+// we detect the field type based on the value-array
+function getFieldType(values: unknown[]): FieldType {
+  // the values-array may contain a lot of nulls.
+  // we need the first not-null item
+  const firstNotNull = values.find((v) => v !== null);
+
+  if (firstNotNull === undefined) {
+    // we could not find any not-null values
+    return FieldType.number;
+  }
+
+  const valueType = typeof firstNotNull;
+
+  switch (valueType) {
+    case 'string':
+      return FieldType.string;
+    case 'boolean':
+      return FieldType.boolean;
+    case 'number':
+      return FieldType.number;
+    default:
+      // this should never happen, influxql values
+      // can only be numbers, strings and booleans.
+      throw new Error(`InfluxQL: invalid value type ${valueType}`);
+  }
+}
+
+// this conversion function is specialized to work with the timeseries
+// data returned by InfluxDatasource.getTimeSeries()
+function timeSeriesToDataFrame(timeSeries: TimeSeries): DataFrame {
+  const times: number[] = [];
+  const values: unknown[] = [];
+
+  // the data we process here is not correctly typed.
+  // the typescript types say every data-point is number|null,
+  // but in fact it can be string or boolean too.
+
+  const points = timeSeries.datapoints;
+  for (const point of points) {
+    values.push(point[0]);
+    times.push(point[1] as number);
+  }
+
+  const timeField = {
+    name: TIME_SERIES_TIME_FIELD_NAME,
+    type: FieldType.time,
+    config: {},
+    values: new ArrayVector<number>(times),
+  };
+
+  const valueField = {
+    name: TIME_SERIES_VALUE_FIELD_NAME,
+    type: getFieldType(values),
+    config: {
+      displayNameFromDS: timeSeries.title,
+    },
+    values: new ArrayVector<unknown>(values),
+    labels: timeSeries.tags,
+  };
+
+  const fields = [timeField, valueField];
+
+  return {
+    name: timeSeries.target,
+    refId: timeSeries.refId,
+    meta: timeSeries.meta,
+    fields,
+    length: values.length,
+  };
+}
 
 export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery, InfluxOptions> {
   type: string;
@@ -33,6 +121,7 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
   database: any;
   basicAuth: any;
   withCredentials: any;
+  access: 'direct' | 'proxy';
   interval: any;
   responseParser: any;
   httpMode: string;
@@ -45,7 +134,7 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
     super(instanceSettings);
 
     this.type = 'influxdb';
-    this.urls = (instanceSettings.url ?? '').split(',').map(url => {
+    this.urls = (instanceSettings.url ?? '').split(',').map((url) => {
       return url.trim();
     });
 
@@ -55,6 +144,7 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
     this.database = instanceSettings.database;
     this.basicAuth = instanceSettings.basicAuth;
     this.withCredentials = instanceSettings.withCredentials;
+    this.access = instanceSettings.access;
     const settingsData = instanceSettings.jsonData || ({} as InfluxOptions);
     this.interval = settingsData.timeInterval;
     this.httpMode = settingsData.httpMode || 'GET';
@@ -70,12 +160,60 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
   }
 
   query(request: DataQueryRequest<InfluxQuery>): Observable<DataQueryResponse> {
+    // for not-flux queries we call `this.classicQuery`, and that
+    // handles the is-hidden situation.
+    // for the flux-case, we do the filtering here
+    const filteredRequest = {
+      ...request,
+      targets: request.targets.filter((t) => t.hide !== true),
+    };
+
     if (this.isFlux) {
-      return super.query(request);
+      return super.query(filteredRequest);
+    }
+
+    if (this.isMigrationToggleOnAndIsAccessProxy()) {
+      return super.query(filteredRequest).pipe(
+        map((res) => {
+          if (res.error) {
+            throw {
+              message: 'InfluxDB Error: ' + res.error.message,
+              res,
+            };
+          }
+
+          const seriesList: any[] = [];
+
+          const groupedFrames = groupBy(res.data, (x) => x.refId);
+          if (Object.keys(groupedFrames).length > 0) {
+            filteredRequest.targets.forEach((target) => {
+              const filteredFrames = groupedFrames[target.refId] ?? [];
+              switch (target.resultFormat) {
+                case 'logs':
+                case 'table':
+                  seriesList.push(
+                    this.responseParser.getTable(filteredFrames, target, {
+                      preferredVisualisationType: target.resultFormat,
+                    })
+                  );
+                  break;
+                default: {
+                  for (let i = 0; i < filteredFrames.length; i++) {
+                    seriesList.push(filteredFrames[i]);
+                  }
+                  break;
+                }
+              }
+            });
+          }
+
+          return { data: seriesList };
+        })
+      );
     }
 
     // Fallback to classic query support
-    return from(this.classicQuery(request));
+    return this.classicQuery(request);
   }
 
   getQueryDisplayText(query: InfluxQuery) {
@@ -95,28 +233,36 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
     return true;
   }
 
-  /**
-   * Only applied on flux queries
-   */
   applyTemplateVariables(query: InfluxQuery, scopedVars: ScopedVars): Record<string, any> {
-    return {
-      ...query,
-      query: this.templateSrv.replace(query.query ?? '', scopedVars), // The raw query text
-    };
+    // We want to interpolate these variables on backend
+    const { __interval, __interval_ms, ...rest } = scopedVars;
+
+    if (this.isFlux) {
+      return {
+        ...query,
+        query: this.templateSrv.replace(query.query ?? '', rest), // The raw query text
+      };
+    }
+
+    if (config.featureToggles.influxdbBackendMigration && this.access === 'proxy') {
+      query = this.applyVariables(query, scopedVars, rest);
+    }
+
+    return query;
   }
 
   /**
    * The unchanged pre 7.1 query implementation
    */
-  async classicQuery(options: any): Promise<DataQueryResponse> {
+  classicQuery(options: any): Observable<DataQueryResponse> {
     let timeFilter = this.getTimeFilter(options);
     const scopedVars = options.scopedVars;
-    const targets = _.cloneDeep(options.targets);
+    const targets = cloneDeep(options.targets);
     const queryTargets: any[] = [];
 
     let i, y;
 
-    let allQueries = _.map(targets, target => {
+    let allQueries = _map(targets, (target) => {
       if (target.hide) {
         return '';
       }
@@ -135,7 +281,7 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
     });
 
     if (allQueries === '') {
-      return Promise.resolve({ data: [] });
+      return of({ data: [] });
     }
 
     // add global adhoc filters to timeFilter
@@ -151,54 +297,56 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
     // replace templated variables
     allQueries = this.templateSrv.replace(allQueries, scopedVars);
 
-    return this._seriesQuery(allQueries, options).then((data: any): any => {
-      if (!data || !data.results) {
-        return [];
-      }
-
-      const seriesList = [];
-      for (i = 0; i < data.results.length; i++) {
-        const result = data.results[i];
-        if (!result || !result.series) {
-          continue;
+    return this._seriesQuery(allQueries, options).pipe(
+      map((data: any) => {
+        if (!data || !data.results) {
+          return { data: [] };
         }
 
-        const target = queryTargets[i];
-        let alias = target.alias;
-        if (alias) {
-          alias = this.templateSrv.replace(target.alias, options.scopedVars);
-        }
-
-        const meta: QueryResultMeta = {
-          executedQueryString: data.executedQueryString,
-        };
-
-        const influxSeries = new InfluxSeries({
-          refId: target.refId,
-          series: data.results[i].series,
-          alias: alias,
-          meta,
-        });
-
-        switch (target.resultFormat) {
-          case 'logs':
-            meta.preferredVisualisationType = 'logs';
-          case 'table': {
-            seriesList.push(influxSeries.getTable());
-            break;
+        const seriesList = [];
+        for (i = 0; i < data.results.length; i++) {
+          const result = data.results[i];
+          if (!result || !result.series) {
+            continue;
           }
-          default: {
-            const timeSeries = influxSeries.getTimeSeries();
-            for (y = 0; y < timeSeries.length; y++) {
-              seriesList.push(timeSeries[y]);
+
+          const target = queryTargets[i];
+          let alias = target.alias;
+          if (alias) {
+            alias = this.templateSrv.replace(target.alias, options.scopedVars);
+          }
+
+          const meta: QueryResultMeta = {
+            executedQueryString: data.executedQueryString,
+          };
+
+          const influxSeries = new InfluxSeries({
+            refId: target.refId,
+            series: data.results[i].series,
+            alias: alias,
+            meta,
+          });
+
+          switch (target.resultFormat) {
+            case 'logs':
+              meta.preferredVisualisationType = 'logs';
+            case 'table': {
+              seriesList.push(influxSeries.getTable());
+              break;
             }
-            break;
+            default: {
+              const timeSeries = influxSeries.getTimeSeries();
+              for (y = 0; y < timeSeries.length; y++) {
+                seriesList.push(timeSeriesToDataFrame(timeSeries[y]));
+              }
+              break;
+            }
           }
         }
-      }
 
-      return { data: seriesList };
-    });
+        return { data: seriesList };
+      })
+    );
   }
 
   async annotationQuery(options: AnnotationQueryRequest<any>): Promise<AnnotationEvent[]> {
@@ -215,11 +363,41 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
       });
     }
 
+    if (config.featureToggles.influxdbBackendMigration && this.access === 'proxy') {
+      // We want to send our query to the backend as a raw query
+      const target: InfluxQuery = {
+        refId: 'metricFindQuery',
+        datasource: this.getRef(),
+        query: this.templateSrv.replace(options.annotation.query ?? ''),
+        rawQuery: true,
+      };
+
+      return lastValueFrom(
+        getBackendSrv()
+          .fetch<BackendDataSourceResponse>({
+            url: '/api/ds/query',
+            method: 'POST',
+            data: {
+              from: options.range.from.valueOf().toString(),
+              to: options.range.to.valueOf().toString(),
+              queries: [target],
+            },
+            requestId: options.annotation.name,
+          })
+          .pipe(
+            map(
+              async (res: FetchResponse<BackendDataSourceResponse>) =>
+                await this.responseParser.transformAnnotationResponse(options, res, target)
+            )
+          )
+      );
+    }
+
     const timeFilter = this.getTimeFilter({ rangeRaw: options.rangeRaw, timezone: options.dashboard.timezone });
     let query = options.annotation.query.replace('$timeFilter', timeFilter);
     query = this.templateSrv.replace(query, undefined, 'regex');
 
-    return this._seriesQuery(query, options).then((data: any) => {
+    return lastValueFrom(this._seriesQuery(query, options)).then((data: any) => {
       if (!data || !data.results || !data.results[0]) {
         throw { message: 'No results in response from InfluxDB' };
       }
@@ -231,21 +409,11 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
   }
 
   targetContainsTemplate(target: any) {
-    for (const group of target.groupBy) {
-      for (const param of group.params) {
-        if (this.templateSrv.variableExists(param)) {
-          return true;
-        }
-      }
-    }
+    // for flux-mode we just take target.query,
+    // for influxql-mode we use InfluxQueryModel to create the text-representation
+    const queryText = this.isFlux ? target.query : buildRawQuery(target);
 
-    for (const i in target.tags) {
-      if (this.templateSrv.variableExists(target.tags[i].value)) {
-        return true;
-      }
-    }
-
-    return false;
+    return this.templateSrv.containsTemplate(queryText);
   }
 
   interpolateVariablesInQueries(queries: InfluxQuery[], scopedVars: ScopedVars): InfluxQuery[] {
@@ -253,59 +421,93 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
       return [];
     }
 
-    let expandedQueries = queries;
-    if (queries && queries.length > 0) {
-      expandedQueries = queries.map(query => {
-        const expandedQuery = {
+    return queries.map((query) => {
+      if (this.isFlux) {
+        return {
           ...query,
-          datasource: this.name,
-          measurement: this.templateSrv.replace(query.measurement ?? '', scopedVars, 'regex'),
-          policy: this.templateSrv.replace(query.policy ?? '', scopedVars, 'regex'),
+          datasource: this.getRef(),
+          query: this.templateSrv.replace(query.query ?? '', scopedVars), // The raw query text
         };
+      }
 
-        if (query.rawQuery) {
-          expandedQuery.query = this.templateSrv.replace(query.query ?? '', scopedVars, 'regex');
-        }
+      return {
+        ...query,
+        datasource: this.getRef(),
+        ...this.applyVariables(query, scopedVars, scopedVars),
+      };
+    });
+  }
 
-        if (query.tags) {
-          const expandedTags = query.tags.map(tag => {
-            const expandedTag = {
-              ...tag,
-              value: this.templateSrv.replace(tag.value, undefined, 'regex'),
-            };
-            return expandedTag;
-          });
-          expandedQuery.tags = expandedTags;
-        }
-        return expandedQuery;
+  applyVariables(query: InfluxQuery, scopedVars: ScopedVars, rest: ScopedVars) {
+    const expandedQuery = { ...query };
+    if (query.groupBy) {
+      expandedQuery.groupBy = query.groupBy.map((groupBy) => {
+        return {
+          ...groupBy,
+          params: groupBy.params?.map((param) => {
+            return this.templateSrv.replace(param.toString(), undefined, 'regex');
+          }),
+        };
       });
     }
-    return expandedQueries;
+
+    if (query.select) {
+      expandedQuery.select = query.select.map((selects) => {
+        return selects.map((select: any) => {
+          return {
+            ...select,
+            params: select.params?.map((param: any) => {
+              return this.templateSrv.replace(param.toString(), undefined, 'regex');
+            }),
+          };
+        });
+      });
+    }
+
+    if (query.tags) {
+      expandedQuery.tags = query.tags.map((tag) => {
+        return {
+          ...tag,
+          value: this.templateSrv.replace(tag.value, undefined, 'regex'),
+        };
+      });
+    }
+
+    return {
+      ...expandedQuery,
+      query: this.templateSrv.replace(query.query ?? '', rest), // The raw query text
+      alias: this.templateSrv.replace(query.alias ?? '', scopedVars),
+      limit: this.templateSrv.replace(query.limit?.toString() ?? '', scopedVars, 'regex'),
+      measurement: this.templateSrv.replace(query.measurement ?? '', scopedVars, 'regex'),
+      policy: this.templateSrv.replace(query.policy ?? '', scopedVars, 'regex'),
+      slimit: this.templateSrv.replace(query.slimit?.toString() ?? '', scopedVars, 'regex'),
+      tz: this.templateSrv.replace(query.tz ?? '', scopedVars),
+    };
   }
 
   async metricFindQuery(query: string, options?: any): Promise<MetricFindValue[]> {
-    if (this.isFlux) {
+    if (this.isFlux || this.isMigrationToggleOnAndIsAccessProxy()) {
       const target: InfluxQuery = {
         refId: 'metricFindQuery',
         query,
+        rawQuery: true,
       };
-      return super
-        .query({
+      return lastValueFrom(
+        super.query({
           ...options, // includes 'range'
           targets: [target],
         } as DataQueryRequest)
-        .toPromise()
-        .then(rsp => {
-          if (rsp.data?.length) {
-            return frameToMetricFindValue(rsp.data[0]);
-          }
-          return [];
-        });
+      ).then((rsp) => {
+        if (rsp.data?.length) {
+          return frameToMetricFindValue(rsp.data[0]);
+        }
+        return [];
+      });
     }
 
     const interpolated = this.templateSrv.replace(query, undefined, 'regex');
 
-    return this._seriesQuery(interpolated, options).then(resp => {
+    return lastValueFrom(this._seriesQuery(interpolated, options)).then((resp) => {
       return this.responseParser.parse(query, resp);
     });
   }
@@ -324,7 +526,7 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
 
   _seriesQuery(query: string, options?: any) {
     if (!query) {
-      return Promise.resolve({ results: [] });
+      return of({ results: [] });
     }
 
     if (options && options.range) {
@@ -340,7 +542,7 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
       return '';
     }
 
-    return _.reduce(
+    return reduce(
       params,
       (memo, value, key) => {
         if (value === null || value === undefined) {
@@ -370,9 +572,7 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
         },
       } as DataQueryRequest<InfluxQuery>;
 
-      return super
-        .query(request)
-        .toPromise()
+      return lastValueFrom(super.query(request))
         .then((res: DataQueryResponse) => {
           if (!res || !res.data || res.state !== LoadingState.Done) {
             console.error('InfluxDB Error', res);
@@ -391,12 +591,39 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
         });
     }
 
+    if (this.isMigrationToggleOnAndIsAccessProxy()) {
+      const target: InfluxQuery = {
+        refId: 'metricFindQuery',
+        query: 'SHOW TAG KEYS',
+        rawQuery: true,
+      };
+      return lastValueFrom(super.query({ targets: [target] } as DataQueryRequest))
+        .then((res: DataQueryResponse) => {
+          if (!res || !res.data || res.state !== LoadingState.Done) {
+            return {
+              status: 'error',
+              message: 'Error reading InfluxDB.',
+            };
+          }
+          if (res.data?.length) {
+            return { status: 'success', message: 'Data source is working.' };
+          }
+          return {
+            status: 'error',
+            message: 'Successfully connected to InfluxDB, but no tags found.',
+          };
+        })
+        .catch((err: any) => {
+          return { status: 'error', message: err.message };
+        });
+    }
+
     const queryBuilder = new InfluxQueryBuilder({ measurement: '', tags: [] }, this.database);
     const query = queryBuilder.buildExploreQuery('RETENTION POLICIES');
 
-    return this._seriesQuery(query)
+    return lastValueFrom(this._seriesQuery(query))
       .then((res: any) => {
-        const error = _.get(res, 'results[0].error');
+        const error = get(res, 'results[0].error');
         if (error) {
           return { status: 'error', message: error };
         }
@@ -426,13 +653,13 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
 
     const { q } = data;
 
-    if (method === 'POST' && _.has(data, 'q')) {
+    if (method === 'POST' && has(data, 'q')) {
       // verb is POST and 'q' param is defined
-      _.extend(params, _.omit(data, ['q']));
-      data = this.serializeParams(_.pick(data, ['q']));
+      extend(params, omit(data, ['q']));
+      data = this.serializeParams(pick(data, ['q']));
     } else if (method === 'GET' || method === 'POST') {
       // verb is GET, or POST without 'q' param
-      _.extend(params, data);
+      extend(params, data);
       data = null;
     }
 
@@ -459,14 +686,15 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
     }
 
     return getBackendSrv()
-      .datasourceRequest(req)
-      .then(
-        (result: any) => {
+      .fetch(req)
+      .pipe(
+        map((result: any) => {
           const { data } = result;
           if (data) {
             data.executedQueryString = q;
             if (data.results) {
               const errors = result.data.results.filter((elem: any) => elem.error);
+
               if (errors.length > 0) {
                 throw {
                   message: 'InfluxDB Error: ' + errors[0].error,
@@ -476,43 +704,51 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
             }
           }
           return data;
-        },
-        (err: any) => {
-          if ((Number.isInteger(err.status) && err.status !== 0) || err.status >= 300) {
-            if (err.data && err.data.error) {
-              throw {
-                message: 'InfluxDB Error: ' + err.data.error,
-                data: err.data,
-                config: err.config,
-              };
-            } else {
-              throw {
-                message: 'Network Error: ' + err.statusText + '(' + err.status + ')',
-                data: err.data,
-                config: err.config,
-              };
-            }
-          } else {
-            throw err;
+        }),
+        catchError((err) => {
+          if (err.cancelled) {
+            return of(err);
           }
-        }
+
+          return throwError(this.handleErrors(err));
+        })
       );
+  }
+
+  handleErrors(err: any) {
+    const error: DataQueryError = {
+      message:
+        (err && err.status) ||
+        (err && err.message) ||
+        'Unknown error during query transaction. Please check JS console logs.',
+    };
+
+    if ((Number.isInteger(err.status) && err.status !== 0) || err.status >= 300) {
+      if (err.data && err.data.error) {
+        error.message = 'InfluxDB Error: ' + err.data.error;
+        error.data = err.data;
+        // @ts-ignore
+        error.config = err.config;
+      } else {
+        error.message = 'Network Error: ' + err.statusText + '(' + err.status + ')';
+        error.data = err.data;
+        // @ts-ignore
+        error.config = err.config;
+      }
+    }
+
+    return error;
   }
 
   getTimeFilter(options: any) {
     const from = this.getInfluxTime(options.rangeRaw.from, false, options.timezone);
     const until = this.getInfluxTime(options.rangeRaw.to, true, options.timezone);
-    const fromIsAbsolute = from[from.length - 1] === 'ms';
-
-    if (until === 'now()' && !fromIsAbsolute) {
-      return 'time >= ' + from;
-    }
 
     return 'time >= ' + from + ' and time <= ' + until;
   }
 
   getInfluxTime(date: any, roundUp: any, timezone: any) {
-    if (_.isString(date)) {
+    if (isString(date)) {
       if (date === 'now') {
         return 'now()';
       }
@@ -527,5 +763,9 @@ export default class InfluxDatasource extends DataSourceWithBackend<InfluxQuery,
     }
 
     return date.valueOf() + 'ms';
+  }
+
+  isMigrationToggleOnAndIsAccessProxy() {
+    return config.featureToggles.influxdbBackendMigration && this.access === 'proxy';
   }
 }

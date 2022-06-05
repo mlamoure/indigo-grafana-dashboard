@@ -1,37 +1,63 @@
-// Libraries
-import React, { useState } from 'react';
-import { connect } from 'react-redux';
-import { hot } from 'react-hot-loader';
+import React, { useEffect, useState } from 'react';
+import { connect, ConnectedProps } from 'react-redux';
 
-// Services & Utils
+import { RICH_HISTORY_SETTING_KEYS } from 'app/core/history/richHistoryLocalStorageUtils';
 import store from 'app/core/store';
-import { RICH_HISTORY_SETTING_KEYS } from 'app/core/utils/richHistory';
+import { ExploreItemState, StoreState } from 'app/types';
+import { ExploreId } from 'app/types/explore';
 
-// Types
-import { StoreState } from 'app/types';
-import { ExploreId, RichHistoryQuery } from 'app/types/explore';
+import { ExploreDrawer } from '../ExploreDrawer';
+import { deleteRichHistory, loadRichHistory } from '../state/history';
 
-// Components, enums
 import { RichHistory, Tabs } from './RichHistory';
 
-//Actions
-import { deleteRichHistory } from '../state/actions';
-import { ExploreDrawer } from '../ExploreDrawer';
+function mapStateToProps(state: StoreState, { exploreId }: { exploreId: ExploreId }) {
+  const explore = state.explore;
+  // @ts-ignore
+  const item: ExploreItemState = explore[exploreId];
+  const { datasourceInstance } = item;
+  const firstTab = store.getBool(RICH_HISTORY_SETTING_KEYS.starredTabAsFirstTab, false)
+    ? Tabs.Starred
+    : Tabs.RichHistory;
+  const { richHistory } = item;
+  return {
+    richHistory,
+    firstTab,
+    activeDatasourceInstance: datasourceInstance?.name,
+  };
+}
 
-export interface Props {
+const mapDispatchToProps = {
+  loadRichHistory,
+  deleteRichHistory,
+};
+
+const connector = connect(mapStateToProps, mapDispatchToProps);
+
+interface OwnProps {
   width: number;
   exploreId: ExploreId;
-  activeDatasourceInstance: string;
-  richHistory: RichHistoryQuery[];
-  firstTab: Tabs;
-  deleteRichHistory: typeof deleteRichHistory;
   onClose: () => void;
 }
+export type Props = ConnectedProps<typeof connector> & OwnProps;
 
 export function RichHistoryContainer(props: Props) {
   const [height, setHeight] = useState(400);
 
-  const { richHistory, width, firstTab, activeDatasourceInstance, exploreId, deleteRichHistory, onClose } = props;
+  const {
+    richHistory,
+    width,
+    firstTab,
+    activeDatasourceInstance,
+    exploreId,
+    deleteRichHistory,
+    loadRichHistory,
+    onClose,
+  } = props;
+
+  useEffect(() => {
+    loadRichHistory(exploreId);
+  }, [loadRichHistory, exploreId]);
 
   return (
     <ExploreDrawer
@@ -53,24 +79,4 @@ export function RichHistoryContainer(props: Props) {
   );
 }
 
-function mapStateToProps(state: StoreState, { exploreId }: { exploreId: ExploreId }) {
-  const explore = state.explore;
-  // @ts-ignore
-  const item: ExploreItemState = explore[exploreId];
-  const { datasourceInstance } = item;
-  const firstTab = store.getBool(RICH_HISTORY_SETTING_KEYS.starredTabAsFirstTab, false)
-    ? Tabs.Starred
-    : Tabs.RichHistory;
-  const { richHistory } = explore;
-  return {
-    richHistory,
-    firstTab,
-    activeDatasourceInstance: datasourceInstance?.name,
-  };
-}
-
-const mapDispatchToProps = {
-  deleteRichHistory,
-};
-
-export default hot(module)(connect(mapStateToProps, mapDispatchToProps)(RichHistoryContainer));
+export default connector(RichHistoryContainer);

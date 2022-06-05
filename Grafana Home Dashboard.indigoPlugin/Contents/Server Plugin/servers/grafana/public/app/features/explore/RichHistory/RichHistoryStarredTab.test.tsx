@@ -1,7 +1,10 @@
-import React from 'react';
 import { mount } from 'enzyme';
-import { ExploreId } from '../../../types/explore';
+import React from 'react';
+
 import { SortOrder } from 'app/core/utils/richHistory';
+
+import { ExploreId } from '../../../types/explore';
+
 import { RichHistoryStarredTab, Props } from './RichHistoryStarredTab';
 
 jest.mock('../state/selectors', () => ({ getExploreDatasources: jest.fn() }));
@@ -11,7 +14,7 @@ const setup = (propOverrides?: Partial<Props>) => {
     queries: [],
     sortOrder: SortOrder.Ascending,
     activeDatasourceOnly: false,
-    datasourceFilters: null,
+    datasourceFilters: [],
     exploreId: ExploreId.left,
     onChangeSortOrder: jest.fn(),
     onSelectDatasourceFilters: jest.fn(),

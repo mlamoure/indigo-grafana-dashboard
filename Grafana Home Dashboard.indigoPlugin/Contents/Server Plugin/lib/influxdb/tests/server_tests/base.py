@@ -36,6 +36,15 @@ def _setup_influxdb_server(inst):
                                      database='db')
 
 
+def _setup_gzip_client(inst):
+    inst.cli = InfluxDBClient('localhost',
+                              inst.influxd_inst.http_port,
+                              'root',
+                              '',
+                              database='db',
+                              gzip=True)
+
+
 def _teardown_influxdb_server(inst):
     remove_tree = sys.exc_info() == (None, None, None)
     inst.influxd_inst.close(remove_tree=remove_tree)
@@ -51,8 +60,15 @@ class SingleTestCaseWithServerMixin(object):
     # 'influxdb_template_conf' attribute must be set
     # on the TestCase class or instance.
 
-    setUp = _setup_influxdb_server
-    tearDown = _teardown_influxdb_server
+    @classmethod
+    def setUp(cls):
+        """Set up an instance of the SingleTestCaseWithServerMixin."""
+        _setup_influxdb_server(cls)
+
+    @classmethod
+    def tearDown(cls):
+        """Tear down an instance of the SingleTestCaseWithServerMixin."""
+        _teardown_influxdb_server(cls)
 
 
 class ManyTestCasesWithServerMixin(object):
@@ -82,3 +98,41 @@ class ManyTestCasesWithServerMixin(object):
     def tearDown(self):
         """Deconstruct an instance of ManyTestCasesWithServerMixin."""
         self.cli.drop_database('db')
+
+
+class SingleTestCaseWithServerGzipMixin(object):
+    """Define the single testcase with server with gzip client mixin.
+
+    Same as the SingleTestCaseWithServerGzipMixin but the InfluxDBClient has
+    gzip=True
+    """
+
+    @classmethod
+    def setUp(cls):
+        """Set up an instance of the SingleTestCaseWithServerGzipMixin."""
+        _setup_influxdb_server(cls)
+        _setup_gzip_client(cls)
+
+    @classmethod
+    def tearDown(cls):
+        """Tear down an instance of the SingleTestCaseWithServerMixin."""
+        _teardown_influxdb_server(cls)
+
+
+class ManyTestCasesWithServerGzipMixin(object):
+    """Define the many testcase with server with gzip client mixin.
+
+    Same as the ManyTestCasesWithServerMixin but the InfluxDBClient has
+    gzip=True.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up an instance of the ManyTestCasesWithServerGzipMixin."""
+        _setup_influxdb_server(cls)
+        _setup_gzip_client(cls)
+
+    @classmethod
+    def tearDown(cls):
+        """Tear down an instance of the SingleTestCaseWithServerMixin."""
+        _teardown_influxdb_server(cls)
