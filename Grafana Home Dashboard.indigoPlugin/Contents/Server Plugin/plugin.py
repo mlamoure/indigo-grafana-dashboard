@@ -611,7 +611,7 @@ class Plugin(indigo.PluginBase):
 		out, err = p.communicate()
 		
 		for line in out.splitlines():
-			if 'influxd' in line:
+			if b'influxd' in line:
 				pid = int(line.split(None, 1)[0])
 				os.kill(pid, signal.SIGKILL)		
 
