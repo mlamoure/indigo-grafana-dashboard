@@ -1,0 +1,35 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Indigo plugin packages (auto-installed by Indigo)
+*.indigoPlugin/Contents/Packages/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Runtime logs
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+pytest.ini
+
+# IDE
+.DS_Store
+.vscode/
+.idea/

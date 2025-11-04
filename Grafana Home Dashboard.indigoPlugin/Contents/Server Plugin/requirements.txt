@@ -17,13 +17,3 @@ msgpack==1.1.2
 
 # Timezone support (required by influxdb for timestamp handling)
 pytz==2025.2
-
-# Installation Instructions:
-# ========================
-# This file is for DEVELOPMENT REFERENCE ONLY.
-#
-# The actual requirements.txt used by Indigo is located at:
-# "Grafana Home Dashboard.indigoPlugin/Contents/Server Plugin/requirements.txt"
-#
-# Indigo automatically installs dependencies from Server Plugin/requirements.txt
-# to "Contents/Packages/" directory on plugin load. No manual installation needed!

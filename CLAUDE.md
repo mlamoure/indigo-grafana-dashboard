@@ -17,12 +17,14 @@ Grafana Home Dashboard.indigoPlugin/
 ├── Contents/
 │   ├── Info.plist                    # Plugin metadata (version 2025.0.0, API 3.6)
 │   ├── Resources/                    # Plugin icon
+│   ├── Packages/                     # Auto-installed dependencies (excluded from git)
 │   └── Server Plugin/
 │       ├── plugin.py                 # Main plugin class (~1100 lines, client-only)
 │       ├── json_adaptor.py           # Converts Indigo objects to InfluxDB format
 │       ├── PluginConfig.xml          # Two-panel config UI (Connection + Inclusion/Exclusion)
-│       └── MenuItems.xml             # Advanced features (filters, device exploration)
-├── requirements.txt                  # Python dependencies (influxdb, requests, msgpack, pytz)
+│       ├── MenuItems.xml             # Advanced features (filters, device exploration)
+│       └── requirements.txt          # Python dependencies (auto-installed by Indigo)
+├── requirements.txt                  # Python dependencies (development reference)
 └── README.md                         # User documentation
 ```
 
@@ -92,20 +94,22 @@ Converts Indigo device objects to InfluxDB-compatible JSON format:
 ### Python Compatibility
 - Requires Python 3.11+ (Indigo 2025.1)
 - Uses pip requirements from `requirements.txt`
-- Dependencies are installed to `Contents/Server Plugin/` directory
+- Dependencies are auto-installed by Indigo to `Contents/Packages/` directory
 
 ### Python Dependencies
-The plugin requires these packages (see `requirements.txt`):
+The plugin requires these packages (see `Server Plugin/requirements.txt`):
 - `influxdb==5.3.2` - InfluxDB 1.x client library
 - `requests==2.32.5` - HTTP library (required by influxdb)
 - `msgpack==1.1.2` - MessagePack serialization
 - `pytz==2025.2` - Timezone support
 
-**Installation**:
-```bash
-cd "Grafana Home Dashboard.indigoPlugin/Contents/Server Plugin"
-/Library/Application\ Support/Perceptive\ Automation/Indigo\ 2025.1/IndigoPluginHost.app/Contents/MacOS/Python3 -m pip install -r ../../requirements.txt --target .
-```
+**Dependency Management**:
+- `requirements.txt` in `Server Plugin/` directory is read by Indigo
+- Indigo automatically installs packages to `Contents/Packages/` on plugin load
+- `Contents/Packages/` is excluded from git (auto-generated)
+- Root `requirements.txt` is kept for development reference only
+
+**No manual installation required** - Indigo handles this automatically!
 
 ## Development Workflow
 
