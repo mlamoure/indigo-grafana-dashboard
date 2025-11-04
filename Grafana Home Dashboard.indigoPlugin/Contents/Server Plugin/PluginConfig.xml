@@ -5,164 +5,101 @@
 				 to the URL specified in the AboutInformation element. -->
 		<SupportURL>https://github.com/mlamoure/indigo-grafana-dashboard/wiki/Indigo-Grafana-Dashboard-Documentation</SupportURL>
 
-		<Field type="menu" id="listConfigurationSelector" defaultValue="server">
+		<Field type="menu" id="listConfigurationSelector" defaultValue="connection">
 			<Label>Configure:</Label>
 			<List>
-				<Option value="server">Server configuration</Option>
+				<Option value="connection">InfluxDB Connection</Option>
 				<Option value="device">Inclusion / Exclusion Criteria</Option>
 			</List>
-		</Field>			
-
-
-	<Field id="DirectoriesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>The two fields below specify where your Influx data and Grafana Dashboards will be stored on your Mac.  The InfluxDB Data Location should be on a Volume that has adequate storage.  These are the only required configuration values for this plugin to initially work unless you have a advanced configuration.  The directories will attempt to be created for you if they do not exist.
-		</Label>
-	</Field>
-
-
-	<Field id="DirectoriesInstruction2" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>InfluxDB Data Location: Influx is a time series database that will store your device log history so that it can be visualized in Grafana.  Depending on the configuration of this plugin, InfluxDB may archive 2-3GB of data per year (or more), based on how many devices you choose to send to InfluxDB (configuratble via the inclusion/exclusion plugin config dialog) and the data retention policy.  See the wiki document for more information.
-		</Label>
-	</Field>
-
-	<Field id="DirectoriesInstruction3" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>Grafana Data Location: Grafana does not store very much data.  It will keep any customizations to your dashboard in this location and minimal logs.
-		</Label>
-	</Field>
-
-		<Field id="InfluxDataLocation" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="/Users/yourusername/Documents/InfluxDB" tooltip="location for the data files for InfluxDB" enabledBindingId="ExternalDB" enabledBindingNegate="true">
-				<Label>InfluxDB Data Location:</Label>
 		</Field>
 
-		<Field id="GrafanaDataLocation" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="/Users/yourusername/Documents/Grafana" tooltip="location for the data files for Grafana" enabledBindingId="DisableGrafana" enabledBindingNegate="true">
-				<Label>Grafana Dashbaord Data Location:</Label>
+
+	<Field id="ConnectionInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>Configure the connection to your InfluxDB server. This plugin supports InfluxDB 1.7 and 1.8 only (not 2.x).
+		</Label>
+	</Field>
+
+
+		<Field id="InfluxHost" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="textfield" defaultValue="localhost" tooltip="Host address">
+					 <Label>InfluxDB Server Host:</Label>
 		</Field>
 
-		<Field type="menu" id="InfluxRetention" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" defaultValue="24">
+		<Field id="InfluxSSL" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="checkbox">
+				<Label>Use SSL</Label>
+				<Description>Enable</Description>
+		</Field>
+
+	<Field id="httpPortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>The HTTP port that the plugin will use to connect to your InfluxDB server (default: 8086)</Label>
+	</Field>
+
+
+		<Field id="InfluxHTTPPort" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="textfield" defaultValue="8086" tooltip="HTTP Port, default 8086">
+				<Label>InfluxDB HTTP Port:</Label>
+		</Field>
+
+	<Field id="InfluxUserInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>The username and password that the plugin will use to connect to your InfluxDB server</Label>
+	</Field>
+
+		<Field id="InfluxUser" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="textfield" defaultValue="indigo" tooltip="user name for indigo posting">
+				<Label>InfluxDB User:</Label>
+		</Field>
+
+
+		<Field id="InfluxPassword" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="textfield" defaultValue="indigo" tooltip="password for indigo posting user" secure="true">
+				<Label>InfluxDB Password:</Label>
+		</Field>
+
+	<Field id="InfluxUseDBInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>The database name that will be created/used on your InfluxDB server</Label>
+	</Field>
+
+		<Field id="InfluxDB" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="textfield" defaultValue="indigo" tooltip="database name in influx">
+				<Label>InfluxDB Database:</Label>
+		</Field>
+
+	<Field id="simpleSeparator3" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="separator"/>
+
+	<Field id="InfluxRetentionInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>Configure how long InfluxDB will retain data. Older data beyond this period will be automatically deleted by InfluxDB. This policy will be created on your InfluxDB server if it doesn't exist.
+		</Label>
+	</Field>
+
+		<Field type="menu" id="InfluxRetention" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" defaultValue="24">
 			<Label>InfluxDB Retention Policy:</Label>
 			<List>
 				<Option value="6">6 months</Option>
 				<Option value="12">1 year</Option>
 				<Option value="24">2 years</Option>
 				<Option value="60">5 years</Option>
-				<Option value="-1">Disabled</Option>
+				<Option value="-1">Disabled (keep forever)</Option>
 			</List>
-		</Field>			
-
-	<Field id="simpleSeparator2" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="separator"/>
-
-<Field id="section1" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-	<Label>-----   Advanced Configuration (these default values should be fine for most users) -----</Label>
-</Field>		
-
-	<Field id="InfluxDisableInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>If you wish to use a external InfluxDB Server and disable the included server, use this option.</Label>
-	</Field>
-
-
-		<Field id="ExternalDB" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
-				<Label>Disable InfluxDB Server:</Label>
 		</Field>
 
-		<Field id="InfluxHost" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="localhost" tooltip="Host address" enabledBindingId="ExternalDB" enabledBindingValue="true">
-					 <Label>InfluxDB External Server Host:</Label>
-		</Field>
+	<Field id="simpleSeparator4" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="separator"/>
 
-		<Field id="InfluxSSL" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox" enabledBindingId="ExternalDB" enabledBindingValue="true">
-				<Label>Use SSL</Label>
+		<Field id="ServerDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="checkbox">
+				<Label>Plugin debug</Label>
 				<Description>Enable</Description>
 		</Field>
 
-	<Field id="InfluxPortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>If using included InfluxDB server, this is the port that the server will be configured; if using an external InfluxDB Server, this is the port that the plugin will connect to.</Label>
-	</Field>
-
-		<Field id="InfluxPort" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="8088" tooltip="Port, default 8088" enabledBindingId="ExternalDB" enabledBindingNegate="true">
-				<Label>InfluxDB Port:</Label>
-		</Field>
-
-	<Field id="httpPortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>If using included InfluxDB server, this is the http port that the server will be configured; if using an external InfluxDB Server, this is the port that the plugin will connect to</Label>
-	</Field>
-
-
-		<Field id="InfluxHTTPPort" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="8086" tooltip="HTTP Port, default 8088">
-				<Label>InfluxDB HTTP Port:</Label>
-		</Field>
-
-	<Field id="InfluxUserInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>If using included InfluxDB server, this is the admin user/password that will be created; if using an external InfluxDB Server, this is the user/password that the plugin will use to connect</Label>
-	</Field>
-
-		<Field id="InfluxUser" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="indigo" tooltip="user name for indigo posting">
-				<Label>InfluxDB User:</Label>
-		</Field>
-
-
-		<Field id="InfluxPassword" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="indigo" tooltip="password for indigo posting user" secure="true">
-				<Label>InfluxDB Password:</Label>
-		</Field>
-
-	<Field id="InfluxUseDBInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>This is the database that will be created/used on the configured InfluxDB server</Label>
-	</Field>
-
-		<Field id="InfluxDB" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="indigo" tooltip="database name in influx">
-				<Label>InfluxDB Database:</Label>
-		</Field>
-
-	<Field id="simpleSeparator3" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="separator"/>
-
-	<Field id="GrafanaDisableInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>Disables the internal Grafana Server in case you've brought your own instance of Grafana.</Label>
-	</Field>
-
-		<Field id="DisableGrafana" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
-				<Label>Disable Included Grafana Server:</Label>
-		</Field>
-
-		<Field id="blank1" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-			<Label>
-			</Label>
-		</Field>
-
-		<Field id="GrafanaAnonymousInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-			<Label>Disables authentication to the Grafana server.  This is needed if you want to access Grafana panels from Indigo Control Pages.  Note that this reduces the security of this plugin.  With this enabled, the Grafana server will allow anonymous, unauthenticated dashboard access for viewing your Grafana to anyone who has un-firewalled network access to your indigo machine.  Use carefully.
-			</Label>
-		</Field>
-
-		<Field id="GrafanaAnonymous" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox" enabledBindingId="DisableGrafana" enabledBindingNegate="true">
-				<Label>Allow anonymous access to Grafana</Label>
-				<Description>Enable</Description>
-		</Field>
-
-		<Field id="GrafanaPort" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="textfield" defaultValue="3006" tooltip="Port, default 3006" enabledBindingId="DisableGrafana" enabledBindingNegate="true">
-				<Label>Grafana Port:</Label>
-		</Field>
-
-	<Field id="simpleSeparator4" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="separator"/>
-
-		<Field id="ServerDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
-				<Label>Plugin and server debug</Label>
-				<Description>Enable</Description>
-		</Field>
-
-		<Field id="ConfigDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+		<Field id="ConfigDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="checkbox">
 				<Label>Configuration debug</Label>
 				<Description>Enable</Description>
 		</Field>
 
-		<Field id="TransportDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+		<Field id="TransportDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="checkbox">
 				<Label>InfluxDB update decisions debug</Label>
 				<Description>Enable</Description>
 		</Field>
 
-		<Field id="TransportDebugL2" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+		<Field id="TransportDebugL2" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="checkbox">
 				<Label>InfluxDB update decisions L2 debug (not recommended)</Label>
 				<Description>Enable</Description>
 		</Field>
 
-		<Field id="JSONDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="server" type="checkbox">
+		<Field id="JSONDebug" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="checkbox">
 				<Label>InfluxDB update full JSON debug (not recommended)</Label>
 				<Description>Enable</Description>
 		</Field>
@@ -189,7 +126,7 @@
 
 <Field id="section2-1" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
 	<Label>Include specific states (for any device)</Label>
-</Field>		
+</Field>
 
 	<Field id="IncStatesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>States from this list will be sent to Influx/Grafana for all devices in your Indigo database, unless the device is excluded in the section below.  The device does not need to be added to the "Include specific device" section in order to be sent.
@@ -215,7 +152,7 @@
 		<Field type="menu" id="menuAvailableStates" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
 			<Label>Available states:</Label>
 			<List class="self" method="AvailableStatesGenerator" dynamicReload="true" />
-		</Field>			
+		</Field>
 
 <Field id="addStateButton" type="button" tooltip="Add the state from the menu above to the included state list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
 	<Label></Label>
@@ -233,7 +170,7 @@
 
 <Field id="section2-2" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
 	<Label>Include specific devices</Label>
-</Field>		
+</Field>
 
 	<Field id="IncDevsInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>Included devices will send ALL states for that device to the Influx database and Grafana.  It's good to include devices that have multiple, unique states that you want to be included in Influx/Grafana without adding each state individually.</Label>
@@ -257,7 +194,7 @@
 		<Field type="menu" id="menuAvailableDevices" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
 			<Label>Available devices:</Label>
 			<List class="self" method="AvailableDevicesGenerator" dynamicReload="true" />
-		</Field>	
+		</Field>
 
 <Field id="addDeviceButton" type="button" tooltip="Add the device from the menu above to the included device list" visibleBindingId="listConfigurationSelector" visibleBindingValue="device">
 	<Label></Label>
@@ -269,7 +206,7 @@
 
 <Field id="section2-3" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
 	<Label>Exclude specific devices</Label>
-</Field>		
+</Field>
 
 	<Field id="ExcDevsInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>This section contains Devices to exclude.  Good to exclude any devices that you will not analyize and that have frequently changing states that match the previous criteria.</Label>
@@ -288,7 +225,7 @@
 
 <Field id="section4" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label">
 	<Label>Other configuration properties</Label>
-</Field>		
+</Field>
 
 	<Field id="MinumumUpdateInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" alignText="left" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>This field configures the minimum frequency of updates.  For each device that is sent to InfluxDB, if the device has not had a change in Indigo in the time period configured, the plugin will send an update to InfluxDB.
@@ -311,6 +248,6 @@
 <!--				<Option value="smart">Smart (at the beginning / end of each day)</Option>-->
 				<Option value="-1">Disabled</Option>
 			</List>
-		</Field>			
+		</Field>
 </PluginConfig>
 

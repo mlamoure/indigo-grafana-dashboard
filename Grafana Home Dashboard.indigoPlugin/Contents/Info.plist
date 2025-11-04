@@ -3,11 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>PluginVersion</key>
-	<string>2.0.1</string>
+	<string>2025.0.0</string>
 	<key>ServerApiVersion</key>
-	<string>3.0</string>
-	<key>IwsApiVersion</key>
-	<string>1.0.0</string>
+	<string>3.6</string>
 	<key>CFBundleDisplayName</key>
 	<string>Grafana Home Dashboard</string>
 	<key>CFBundleIdentifier</key>

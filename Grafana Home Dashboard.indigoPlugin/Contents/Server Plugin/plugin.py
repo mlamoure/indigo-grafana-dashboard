@@ -1,10 +1,7 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 # Copyright (c) 2018 Mike Lamoureux
-#
-
-import sys
-sys.path.append('./lib')
+# Modernized 2025 - InfluxDB client only (no bundled servers)
 
 import indigo
 import datetime
@@ -15,14 +12,6 @@ import os
 from json_adaptor import JSONAdaptor
 from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError
-import fileinput
-import shutil
-import subprocess
-from subprocess import check_output
-import socket
-import signal
-from distutils.version import LooseVersion
-import requests
 
 WAIT_POLLING_INTERVAL = 5 # used ocassionally to wait for a sequantal process to happen
 FAST_POLLING_INTERVAL = 5
@@ -74,25 +63,8 @@ class Plugin(indigo.PluginBase):
 		self.configured = True
 
 		self.ConnectionRetryCount = 0
-		self.InfluxServerStartFailureCount = 0
-		self.GrafanaServerStartFailureCount = 0
-
-		self.badInfluxConfig = False
-
 		self.QuietConnectionError = False
-		self.QuietNoInfluxConfigured = False
-		self.QuietNoGrafanaConfigured = False
 		self.StopConnectionAttempts = False
-
-		self.InfluxServerPID = None
-		self.GrafanaServerPID = None
-		self.triggerInfluxReset = False
-		self.triggerInfluxRestart = False
-		self.triggerInfluxAdminReset = False
-		self.triggerGrafanaRestart = False
-		self.triggerGrafanaReset = False
-
-		self.InfluxRequireAuth = True
 
 		self.VariableLastUpdatedList = []
 		self.DeviceLastUpdatedList = []
@@ -109,14 +81,9 @@ class Plugin(indigo.PluginBase):
 		self.folders = {}
 		self.pollingInterval = DEFAULT_POLLING_INTERVAL
 		self.connected = False
-		self.InfluxServerStatus = "stopped"
-		self.GrafanaServerStatus = "stopped"
-		self.influxConfigFileLoc = os.getcwd() + '/servers/influxdb/influxdb.conf'
-		self.GrafanaConfigFileLoc = os.getcwd() + '/servers/grafana/conf/indigo.ini'
 		self.FilterLogFileLoc = os.getcwd() + '/filter.log'
 
 		self.LastConfigRefresh = datetime.datetime.now()
-		self.lastInfluxConfigCheck = datetime.datetime.now()
 
 		self.lastUpdateCheck = None
 		self.lastLogPrune = None
@@ -125,17 +92,10 @@ class Plugin(indigo.PluginBase):
 		try:
 			self.InfluxHost = self.pluginPrefs.get('InfluxHost', 'localhost')
 			self.InfluxSSL = self.pluginPrefs.get('InfluxSSL', False)
-			self.InfluxPort = self.pluginPrefs.get('InfluxPort', '8088')
 			self.InfluxHTTPPort = self.pluginPrefs.get('InfluxHTTPPort', '8086')
 			self.InfluxUser = self.pluginPrefs.get('InfluxUser', 'indigo')
 			self.InfluxPassword = self.pluginPrefs.get('InfluxPassword', 'indigo')
 			self.InfluxDB = self.pluginPrefs.get('InfluxDB', 'indigo')
-			self.ExternalDB = self.pluginPrefs.get('ExternalDB', False)
-			self.GrafanaDataLocation = self.pluginPrefs.get('GrafanaDataLocation', None)
-			self.InfluxDataLocation = self.pluginPrefs.get('InfluxDataLocation', None)
-			self.GrafanaAnonymous = self.pluginPrefs.get('GrafanaAnonymous', False)
-			self.DisableGrafana = self.pluginPrefs.get('DisableGrafana', False)
-			self.GrafanaPort = self.pluginPrefs.get('GrafanaPort', '3006')
 			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
 
 			if self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60) == "smart":
@@ -196,7 +156,7 @@ class Plugin(indigo.PluginBase):
 			pass
 
 		if self.configured:
-			self.restartAll()
+			self.connect()
 
 		self.BuildConfigurationLists()
 		self.UpdateAll()
@@ -205,8 +165,9 @@ class Plugin(indigo.PluginBase):
 
 	# called after runConcurrentThread() exits
 	def shutdown(self):
-		self.StopInfluxServer()
-		self.StopGrafanaServer()
+		if self.connection:
+			self.connection.close()
+		self.connected = False
 
 	def connect(self):
 		self.logger.debug("running connect()")
@@ -216,10 +177,10 @@ class Plugin(indigo.PluginBase):
 			return
 
 		if not self.configured:
-			self.logger.debug("   haulting connect(); configured = false")			
+			self.logger.debug("   haulting connect(); configured = false")
 			return
 
-		if not self.QuietConnectionError and (self.ExternalDB or self.debug):
+		if not self.QuietConnectionError or self.debug:
 			self.logger.info("connecting to InfluxDB... " + self.InfluxHost + ":" + self.InfluxHTTPPort + " using user account: " + self.InfluxUser)
 
 		self.connected = False
@@ -265,40 +226,18 @@ class Plugin(indigo.PluginBase):
 
 			self.logger.debug("   connection attempt " + str(self.ConnectionRetryCount) + ": error while connecting to InfluxDB: " + str(e))
 
-			# speed up the polling interval to make the connection attempts quicker
-			if not self.ExternalDB:
-				self.pollingInterval = FAST_POLLING_INTERVAL
-			
-			# Check to see if there is a admin user account issue, and, if so, trigger a admin refresh.
+			# Check for authorization failures
 			if "authorization failed" in str(e).lower():
 				if not self.QuietConnectionError:
-					self.logger.error("    error while connecting to InfluxDB: authorization failed.")
-	
+					self.logger.error("    error while connecting to InfluxDB: authorization failed. Please check your credentials.")
 				self.StopConnectionAttempts = True
 				self.QuietConnectionError = True
-			elif "admin user" in str(e).lower() and not self.ExternalDB:
-				self.logger.debug("    detected that there is something wrong with the admin account, triggering a refresh")
-				self.logger.info("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
-				self.triggerInfluxAdminReset = True					
-				self.triggerInfluxRestart = True			
 			elif not self.QuietConnectionError:
-				if not self.ExternalDB:
-					self.logger.error("error while connecting to InfluxDB, this can happen when the Indigo server is slow to start up.  Will continue to try silently in the background.")
-				else:
-					self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
-
+				self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
 				self.QuietConnectionError = True
-			elif self.ConnectionRetryCount == 12 and not self.ExternalDB:
-				self.logger.error("error while attempting to connect to internal InfluxDB Server after " + str(self.ConnectionRetryCount) + " attempts, stopping attempts.  Please check your configuration or contact support.  Error: " + str(e))
-				self.StopConnectionAttempts = True
-			elif self.ConnectionRetryCount > 10 and self.ExternalDB:
+			elif self.ConnectionRetryCount > 10:
 				self.pollingInterval = LONG_POLLING_INTERVAL
 				self.logger.error("error while connecting to InfluxDB after " + str(self.ConnectionRetryCount) + " attempts, will now attempt silently every 15 minutes.  Most recent connection error: " + str(e))
-
-			# every 10 connection attempts retry starting the Influx server
-			if (self.ConnectionRetryCount == 2 or self.ConnectionRetryCount%10 == 0) and not self.ExternalDB and not self.triggerInfluxRestart and not self.badInfluxConfig:
-				self.logger.debug("    triggering a InfluxDB restart since connections are failing")
-				self.triggerInfluxRestart = True
 
 		self.logger.debug("completed connect()")
 
@@ -361,49 +300,6 @@ class Plugin(indigo.PluginBase):
 		try:
 			while True:
 				try:
-
-					self.checkServerStatus()
-
-					if self.triggerInfluxReset:
-						self.logger.debug("detected that a Influx reset needs to occur...")
-						self.triggerInfluxRestart = True
-						self.CreateInfluxAdmin()
-
-					elif self.triggerInfluxAdminReset:
-						self.logger.debug("detected that a InfluxDB admin account Reset needs to occur...")
-						self.triggerInfluxAdminReset = False
-						self.triggerInfluxRestart = True
-						self.CreateInfluxAdmin()
-
-					elif self.triggerGrafanaReset:
-						self.logger.debug("detected that a Grafana reset needs to occur...")
-						self.triggerGrafanaRestart = True
-						self.CreateGrafanaConfig()
-
-					elif self.triggerInfluxRestart and self.triggerGrafanaRestart:
-						self.logger.debug("detected that a server restart needs to occur...")
-						self.triggerInfluxRestart = False
-						self.triggerGrafanaRestart = False
-						self.restartAll()
-
-					elif self.triggerInfluxRestart:
-						self.logger.debug("detected that a influx server restart needs to occur...")
-						self.triggerInfluxRestart = False
-						self.restartInflux()
-
-					elif self.triggerGrafanaRestart:
-						self.logger.debug("detected that a grafana server restart needs to occur...")
-						self.triggerGrafanaRestart = False
-						self.restartGrafana()
-
-					# Check if Influx is not auth enabled
-					elif self.connected and self.lastInfluxConfigCheck + datetime.timedelta(minutes=10) < datetime.datetime.now() and not self.ExternalDB and not self.CheckInfluxAuthConfig():
-						self.lastInfluxConfigCheck = datetime.datetime.now()
-						self.logger.debug("scheduling a Influx admin reset since it was discovered that auth was disabled")
-						self.pollingInterval = FAST_POLLING_INTERVAL
-						self.triggerInfluxAdminReset = True
-						self.triggerInfluxRestart = True
-
 					if not self.connected:
 						self.connect()
 
@@ -411,7 +307,7 @@ class Plugin(indigo.PluginBase):
 						self.UpdateAll()
 
 					# prune the logs
-					if self.lastLogPrune < datetime.datetime.now()-datetime.timedelta(hours=LOG_PRUNE_FREQUENCY):
+					if self.lastLogPrune and self.lastLogPrune < datetime.datetime.now()-datetime.timedelta(hours=LOG_PRUNE_FREQUENCY):
 						self.pruneFilterBlocksEventLog()
 
 				except Exception as e:
@@ -426,8 +322,9 @@ class Plugin(indigo.PluginBase):
 
 		except self.StopThread:
 			self.logger.debug("Received StopThread")
-			self.StopInfluxServer()
-			self.StopGrafanaServer()
+			if self.connection:
+				self.connection.close()
+			self.connected = False
 
 	def UpdateAll(self):
 
@@ -558,479 +455,6 @@ class Plugin(indigo.PluginBase):
 
 		if self.TransportDebug:
 			self.logger.debug("completed deviceUpdated() for " + origDev.name)
-
-	def restartAll(self):
-		self.StopInfluxServer()
-		self.StopGrafanaServer()
-
-		if not self.ExternalDB:
-			self.StartInfluxServer()
-		else:
-			self.connect()
-
-		if self.connected and not self.DisableGrafana:
-			self.StartGrafanaServer()
-			self.QuietNoGrafanaConfigured = False
-
-		if not self.connected and not self.QuietNoGrafanaConfigured and not self.DisableGrafana:
-			self.logger.debug("not currently connected to any InfluxDB, so will not start the Grafana Server")
-			self.QuietNoGrafanaConfigured = True
-
-	def restartGrafana(self):
-		if not self.DisableGrafana:
-			self.logger.info("######## About to (re) start Grafana.  Please be patient while this happens. ########")
-		
-		self.StopGrafanaServer()
-
-		if not self.DisableGrafana:
-			self.StartGrafanaServer()
-
-	def restartInflux(self):
-		self.logger.info("######## About to (re) start InfluxDB.  Please be patient while this happens. ########")
-		self.StopInfluxServer()
-
-		if not self.ExternalDB:
-			self.StartInfluxServer()
-		else:
-			self.connect()
-
-	def StopInfluxServer(self):
-		if self.ExternalDB:
-			return
-
-		self.InfluxServerStatus = "stopped"
-		self.connected = False
-
-		if self.InfluxServerPID is not None:
-			self.logger.info("shutting down the InfluxDB Server...")
-			self.InfluxServerPID.kill()
-
-		self.InfluxServerPID = None
-
-		p = subprocess.Popen(['ps', '-A'], stdout=subprocess.PIPE)
-		out, err = p.communicate()
-		
-		for line in out.splitlines():
-			if b'influxd' in line:
-				pid = int(line.split(None, 1)[0])
-				os.kill(pid, signal.SIGKILL)		
-
-	def StartInfluxServer(self):
-		self.logger.debug("running StartInfluxServer()")
-
-		if not self.configured:
-			self.logger.debug("   not starting the Influx server because plugin is not yet configured")
-			return
-
-		if self.ExternalDB:
-			self.logger.debug("   not starting the Influx server because an ExternalDB is configured")
-			return
-
-		if self.badInfluxConfig:
-			self.logger.debug("   not starting the Influx server because badInfluxConfig is flagged")
-			return
-
-		if not os.path.isfile(self.influxConfigFileLoc):
-			self.rebuildInflux()
-			return
-
-		if self.InfluxDataLocation is None:
-			self.logger.error("please check your plugin configuration, data location for Influx does not exist")
-			self.badInfluxConfig = True
-			return
-
-		if not os.path.isdir(self.InfluxDataLocation):
-			self.logger.error("the InfluxDB data location does not exist, please check your configuration")
-			self.badInfluxConfig = True
-			return
-
-		if self.InfluxServerStartFailureCount == 1 and not self.triggerInfluxReset:
-			self.logger.error("cannot seem to start InfluxDB, triggering a rebuilding (reset) of Influx config")
-			self.triggerInfluxReset = True
-			return
-
-		if self.InfluxServerStartFailureCount > 1:
-			if not self.QuietNoInfluxConfigured:
-				self.logger.error("failed to start the Influx server after a rebuild, please check your config and contact support on the Indigo forums")
-	
-			self.triggerInfluxRestart = False
-			self.QuietNoInfluxConfigured = True
-			return
-
-		self.logger.info ("starting the InfluxDB Server...")
-		runInfluxCommand = os.getcwd().replace(" ", "\ ") + "/servers/influxdb/influxd run -config " + self.influxConfigFileLoc.replace(" ", "\ ")
-
-		self.logger.debug("starting the InfluxDB Server using command: " + runInfluxCommand)
-
-		self.InfluxServerPID = subprocess.Popen(runInfluxCommand, shell=True)
-		time.sleep(WAIT_POLLING_INTERVAL)
-
-		loopcount = 1
-		while loopcount < 10:
-			time.sleep(WAIT_POLLING_INTERVAL)
-			result = self.checkRunningServer(self.InfluxPort)
-			if result:
-				self.logger.info ("######## InfluxDB server started. ########")
-
-				time.sleep(WAIT_POLLING_INTERVAL)
-
-				self.InfluxServerStatus = "started"
-				self.QuietNoInfluxConfigured = False
-				self.InfluxServerStartFailureCount = 0
-				self.triggerInfluxReset = False
-				self.StopConnectionAttempts = False
-				self.triggerInfluxRestart = False
-				self.pollingInterval = DEFAULT_POLLING_INTERVAL	
-
-				self.connect()
-				self.logger.debug("completed StartInfluxServer()")
-				return True
-				
-			loopcount = loopcount + 1
-
-		self.logger.error("error starting the InfluxDB server... will attempt to resolve.")
-		self.pollingInterval = FAST_POLLING_INTERVAL
-		self.InfluxServerStatus = "stopped"
-		self.InfluxServerStartFailureCount = self.InfluxServerStartFailureCount + 1
-		self.triggerInfluxRestart = True
-
-	def StartGrafanaServer(self):
-		self.logger.debug("running StartGrafanaServer()")
-
-		if not os.path.isfile(self.GrafanaConfigFileLoc):
-			self.rebuildGrafana()
-			return
-
-		if self.GrafanaDataLocation is None:
-			self.logger.debug("please check your config, data location for Grafana does not exist")
-			return
-
-		if not os.path.isdir(self.GrafanaDataLocation):
-			self.logger.debug("the Grafana data location does not exist, please check your configuration")
-			return
-
-		if self.GrafanaServerStartFailureCount > 1:
-			self.logger.error("failed to start the Grafana server more than once, will not attempt again, please check your config")
-			self.triggerGrafanaRestart = False
-			self.QuietNoGrafanaConfigured = True
-			return
-
-		self.logger.info ("starting the Grafana server...")
-		runGrafanaCommand = os.getcwd().replace(" ", "\ ") + "/servers/grafana/grafana-server -homepath " + os.getcwd().replace(" ", "\ ") + "/servers/grafana/" + " -config " + self.GrafanaConfigFileLoc.replace(" ", "\ ")
-
-		self.logger.debug("starting the Grafana server using command: " + runGrafanaCommand)
-
-		self.GrafanaServerPID = subprocess.Popen(runGrafanaCommand, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-		time.sleep(WAIT_POLLING_INTERVAL)
-
-		loopcount = 1
-		while loopcount < 3:
-			time.sleep(WAIT_POLLING_INTERVAL)
-			result = self.checkRunningServer(self.GrafanaPort)
-			if result:
-				self.logger.info("######## Grafana server started. ########")
-				self.logger.info ("    You can now access your Indigo Home Dashboard via: http://localhost:" + self.GrafanaPort + " (or by using your Mac's IP address from another computer on your local network)")
-
-				if self.GrafanaAnonymous:
-					self.logger.info ("    IMPORTANT: Your server is allowing anonymous, unauthenticated dashboard access for viewing your Grafana Server")
-
-				self.GrafanaServerStatus = "started"
-				self.triggerGrafanaRestart = False
-				self.GrafanaServerStartFailureCount = 0
-				self.logger.debug("completed StartGrafanaServer()")
-				return True
-				
-			loopcount = loopcount + 1
-
-		self.GrafanaServerStatus = "stopped"
-		self.GrafanaServerStartFailureCount = self.GrafanaServerStartFailureCount + 1
-
-		if self.GrafanaServerStartFailureCount > 5:
-			self.logger.error("error starting the Grafana server, exausted retry attempts")
-			self.triggerGrafanaRestart = False
-		elif self.GrafanaServerStartFailureCount == 1:
-			self.logger.error("error starting the Grafana server... will continue to attempt in the background")
-			self.triggerGrafanaRestart = True
-		elif self.GrafanaServerStartFailureCount == 3:
-			self.logger.debug("error starting the Grafana server... triggering a reset")
-			self.triggerGrafanaReset = True
-		else:
-			self.triggerGrafanaRestart = True
-
-		self.logger.debug("completed StartGrafanaServer()")
-
-	def StopGrafanaServer(self):
-		if self.DisableGrafana:
-			return
-
-		self.GrafanaServerStatus = "stopped"
-
-		if self.GrafanaServerPID is not None:
-			self.logger.info("shutting down the Grafana Server...")
-			self.GrafanaServerPID.kill()
-
-		self.GrafanaServerPID = None
-
-		p = subprocess.Popen(['ps', '-A'], stdout=subprocess.PIPE)
-		out, err = p.communicate()
-		
-		for line in out.splitlines():
-			if b'grafana' in line:
-				pid = int(line.split(None, 1)[0])
-				os.kill(pid, signal.SIGKILL)		
-
-	def checkServerStatus(self):
-
-		if not self.configured:
-			return
-
-		if self.ExternalDB and self.DisableGrafana:
-			return
-
-		self.logger.debug("running checkServerStatus()")
-		influxResult = self.checkRunningServer(self.InfluxHTTPPort)
-		grafanaResult = self.checkRunningServer(self.GrafanaPort)
-
-		if grafanaResult:
-			self.GrafanaServerStatus = "started"
-		else:
-			self.GrafanaServerStatus = "stopped"
-
-		if influxResult:
-			self.InfluxServerStatus = "started"
-		else:
-			self.InfluxServerStatus = "stopped"
-
-		if not self.DisableGrafana and self.connected and not grafanaResult and not self.triggerGrafanaRestart and self.GrafanaServerStartFailureCount <= 5:
-			self.logger.debug("   found that Grafana is not running, triggering a restart")
-			self.triggerGrafanaRestart = True
-
-		self.logger.debug("completed checkServerStatus(), GrafanaServerStatus: " + self.GrafanaServerStatus + ", InfluxServerStatus: " + self.InfluxServerStatus)
-
-	def checkRunningServer(self, port):
-		try:			
-			sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			result = sock.connect_ex(("127.0.0.1", int(port)))
-			
-			if result == 0: return True
-			
-		except Exception as e:
-			self.logger.error(e)	
-			
-		return False
-
-	def CreateGrafanaConfig(self):
-		if not self.DisableGrafana and self.GrafanaDataLocation is not None:
-
-			try:
-				if not os.path.exists(self.GrafanaDataLocation):
-					os.makedirs(self.GrafanaDataLocation)
-			except Exception as e:
-				self.logger.error("error while creating the Grafana data location, please check your configuration")
-				self.logger.debug(str(e))
-				self.configured = False
-				return
-
-			if not os.path.exists(self.GrafanaDataLocation):
-				self.logger.error("the Grafana data location does not exist, please check your configuration")
-				self.configured = False
-				return
-
-			if not os.path.isdir(self.GrafanaDataLocation):
-				self.logger.error("the Grafana data location does not exist, please check your configuration")
-				self.configured = False
-				return
-
-			if self.GrafanaServerStatus != "stopped":
-				self.StopGrafanaServer()
-
-			self.logger.debug("running CreateGrafanaConfig()")
-
-			GrafanaDefaultConfigFileLoc = os.getcwd() + '/servers/grafana/conf/defaults.ini'
-
-			if os.path.isfile(self.GrafanaConfigFileLoc):
-				os.remove(self.GrafanaConfigFileLoc)
-
-			shutil.copyfile(GrafanaDefaultConfigFileLoc, self.GrafanaConfigFileLoc)
-
-			for line in fileinput.input(self.GrafanaConfigFileLoc, inplace=True):
-				if fileinput.lineno() == 15:
-					line = "data = " + self.GrafanaDataLocation + "\n"
-					self.logger.debug("     setting Grafana data directory to: " + self.GrafanaDataLocation)
-				elif fileinput.lineno() == 18:
-					line = "logs = " + self.GrafanaDataLocation + "/log\n"
-					self.logger.debug("     setting Grafana log directory to: " + self.GrafanaDataLocation + "/log")
-				elif fileinput.lineno() == 35:
-					line = "http_port = " + self.GrafanaPort + "\n"
-					self.logger.debug("     setting Grafana port to: " + self.GrafanaPort)
-				elif fileinput.lineno() == 243:
-					line = "enabled = " + str(self.GrafanaAnonymous).lower() + "\n"
-					self.logger.debug("     setting Grafana anonymous to: " + str(self.GrafanaAnonymous).lower())
-
-				sys.stdout.write(line)
-
-
-			# edit the default dashboard provisioning to include the default indigo dashboard
-
-#			dashboard_yaml = os.getcwd() + '/servers/grafana/conf/provisioning/dashboards/sample.yaml'
-#			provisioning_dashboards_location = os.getcwd() + "/servers/grafana/indigodashboard/"
-#
-#			for line in fileinput.input(dashboard_yaml, inplace=True):
-#				if fileinput.lineno() == 10:
-#					line = "     path: " + provisioning_dashboards_location
-#
-#				sys.stdout.write(line)
-
-			self.triggerGrafanaReset = False
-			self.logger.debug("completed CreateGrafanaConfig()")
-			self.logger.info("config file for Grafana has been updated; server will restart shortly.")
-
-	def DeleteInfluxAdmin(self, user):
-		if self.ExternalDB:
-			self.logger.debug("not going to delete Influx admin, because the plugin is configured for a external Influx server")
-			return
-
-		self.logger.debug("droping database user: " + user)
-		if self.connected:
-			try:
-				self.connection.drop_user(user)
-			except:
-				self.logger.debug("error while dropping user, likely the user did not exist")
-				return False
-
-			return True
-		return False
-
-	def CreateInfluxAdmin(self):
-		if self.ExternalDB:
-			self.logger.debug("not going to create Influx admin, because the plugin is configured for a external Influx server")
-			return
-
-		if not self.configured or self.badInfluxConfig:
-			self.logger.debug("not going to create Influx admin, because the plugin is not configured correctly")
-			return
-
-		self.StopInfluxServer()
-
-		self.CreateInfluxConfig(RequireAuth = False)
-
-		if not self.configured or self.badInfluxConfig:
-			self.logger.debug("not going to proceed further in creating Influx admin, because the plugin is not configured correctly")
-			return
-	
-		self.StartInfluxServer()
-
-		self.DeleteInfluxAdmin(self.InfluxUser)
-
-		self.logger.debug("creating database admin user: " + self.InfluxUser)
-
-		if self.connected:
-			self.connection.create_user(self.InfluxUser, self.InfluxPassword, admin=True)
-			self.connection.grant_privilege("all", self.InfluxDB, self.InfluxUser)
-
-		self.CreateInfluxConfig()
-		self.StartInfluxServer()
-
-	def CheckInfluxAuthConfig(self):
-		self.logger.debug("running CheckInfluxAuthConfig()")
-
-		if not os.path.isfile(self.influxConfigFileLoc):
-			return False
-
-		currentSection = "none"
-
-		with open(self.influxConfigFileLoc) as f:
-			content = f.readlines()
-
-		for line in content:
-			if line[0] == "[":
-				currentSection = line.rstrip()
-				if self.ConfigDebug:
-					self.logger.debug("now reviewing Influx config section: " + currentSection)
-
-			if currentSection == "[http]" and "auth-enabled" in line:
-				if "true" in line:
-					self.logger.debug("   found that InfluxDB auth is enabled")
-					return True
-				self.logger.debug("   found that InfluxDB auth is disabled")
-				return False
-		return False
-
-	def CreateInfluxConfig(self, RequireAuth = True):
-		if not self.ExternalDB and self.InfluxDataLocation is not None:
-			self.logger.debug("setting the InfluxDB data location to: " + self.InfluxDataLocation)
-
-			try:
-				if not os.path.exists(self.InfluxDataLocation):
-					os.makedirs(self.InfluxDataLocation)
-			except Exception as e:
-				self.logger.error("error while creating the InfluxDB data location, please check your configuration")
-				self.logger.debug(str(e))
-				self.configured = False
-				self.badInfluxConfig = True
-				return
-
-			if not os.path.exists(self.InfluxDataLocation):
-				self.logger.error("the InfluxDB data location does not exist, please check your configuration")
-				self.configured = False
-				self.badInfluxConfig = True
-				return
-
-			if not os.path.isdir(self.InfluxDataLocation):
-				self.logger.error("the InfluxDB data location does not exist, please check your configuration")
-				self.configured = False
-				self.badInfluxConfig = True
-				return
-
-			if self.InfluxServerStatus != "stopped":
-				self.StopInfluxServer()
-
-			currentSection = "none"
-			influxDefaultConfigFileLoc = os.getcwd() + '/servers/influxdb/default.conf'
-
-			if os.path.isfile(self.influxConfigFileLoc):
-				os.remove(self.influxConfigFileLoc)
-
-			shutil.copyfile(influxDefaultConfigFileLoc, self.influxConfigFileLoc)
-
-			if self.debug:
-				self.logger.debug("loading the Influx configuration file: " + self.influxConfigFileLoc)
-
-			bindAddress = "127.0.0.1:" + self.InfluxPort
-
-			for line in fileinput.input(self.influxConfigFileLoc, inplace=True):
-
-				# section detection
-
-				if line[0] == "[":
-					currentSection = line.rstrip()
-
-					self.logger.debug("now editing Influx config section: " + currentSection)
-
-				if fileinput.lineno() == 2 and currentSection == "none" and "bind-address" in line:
-					line = "bind-address = \"" + bindAddress + "\"\n"
-				elif currentSection == "[meta]" and "dir" in line:
-					line = "  dir = \"" + self.InfluxDataLocation + "/meta\"\n"
-				elif currentSection == "[data]" and "wal-dir" in line:
-					line = "  wal-dir = \"" + self.InfluxDataLocation + "/wal\"\n"
-				elif currentSection == "[data]" and "dir" in line:
-					line = "  dir = \"" + self.InfluxDataLocation + "/data\"\n"
-				elif currentSection == "[http]" and "bind-address" in line:
-					line = "  bind-address = \":" + self.InfluxHTTPPort + "\"\n"
-				elif RequireAuth and currentSection == "[http]" and "auth-enabled" in line:
-					self.logger.debug("influxDB auth-enabled set to true")
-					self.InfluxRequireAuth = True
-					line = "  auth-enabled = true\n"
-				elif not RequireAuth and currentSection == "[http]" and "auth-enabled" in line:
-					self.logger.debug("influxDB auth-enabled set to false")
-					self.InfluxRequireAuth = False
-					line = "  auth-enabled = false\n"
-
-				sys.stdout.write(line)
-
-			self.badInfluxConfig = False
-			self.logger.info("config file for InfluxDB has been updated; server will restart shortly.")
-
 
 	def DeviceToInflux(self, origDev, dev, updateCheck = True):
 		# custom add to influx work
@@ -1179,12 +603,9 @@ class Plugin(indigo.PluginBase):
 
 	def closedPrefsConfigUi(self, valuesDict, userCancelled):
 		if not userCancelled:
-			InfluxServerChanged = False
-			GrafanaServerChanged = False
-			ExternalInfluxDBServerChanged = False
+			ConnectionChanged = False
 
 			self.debug = valuesDict["ServerDebug"]
-
 			self.ConfigDebug = valuesDict["ConfigDebug"]
 			self.TransportDebug = valuesDict["TransportDebug"]
 			self.TransportDebugL2 = valuesDict["TransportDebugL2"]
@@ -1196,121 +617,50 @@ class Plugin(indigo.PluginBase):
 
 			self.logger.debug("started processing closedPrefsConfigUi")
 
-			if self.ExternalDB != valuesDict['ExternalDB']:
-				# If the user changed the External status, and the internal server was previously running, we need to stop the server.
-				if self.InfluxServerStatus == "started":
-					self.StopInfluxServer()
-				
-				# this flag is used for the admin accounts
-				ExternalInfluxDBServerChanged = True
+			# Check if connection settings changed
+			if (self.InfluxHost != valuesDict['InfluxHost'] or
+				self.InfluxSSL != valuesDict['InfluxSSL'] or
+				self.InfluxHTTPPort != valuesDict['InfluxHTTPPort'] or
+				self.InfluxUser != valuesDict['InfluxUser'] or
+				self.InfluxPassword != valuesDict['InfluxPassword'] or
+				self.InfluxDB != valuesDict['InfluxDB'] or
+				not self.configured):
+				ConnectionChanged = True
 
-				self.ExternalDB = valuesDict['ExternalDB']
+			# Update connection settings
+			self.InfluxHost = valuesDict['InfluxHost']
+			self.InfluxSSL = valuesDict['InfluxSSL']
+			self.InfluxHTTPPort = valuesDict['InfluxHTTPPort']
+			self.InfluxUser = valuesDict['InfluxUser']
+			self.InfluxPassword = valuesDict['InfluxPassword']
+			self.InfluxDB = valuesDict['InfluxDB']
 
-				# If the user changed from external to internal, refresh Grafana.  Not sure why, validate
-				if not self.ExternalDB:
-					GrafanaServerChanged = True
-
-			# If the user saved the config and External was selected and the server is stopped, we want to trigger a refresh no matter what was changed.
-			if not self.ExternalDB and self.InfluxServerStatus == "stopped":
-				InfluxServerChanged = True
-
-			if self.ExternalDB:
-				if self.InfluxHost != valuesDict['InfluxHost'] or self.InfluxSSL != valuesDict['InfluxSSL']:
-					InfluxServerChanged = True
-
-				self.InfluxHost = valuesDict['InfluxHost']
-				self.InfluxSSL = valuesDict['InfluxSSL']
-			else:
-				self.InfluxHost = "localhost"
-				valuesDict['InfluxHost'] = "localhost"
-				self.InfluxSSL = False
-				valuesDict['InfluxSSL'] = False
-
-			if self.InfluxPort != valuesDict['InfluxPort']:
-				self.InfluxPort = valuesDict['InfluxPort']
-				InfluxServerChanged = True
-
-			if self.InfluxHTTPPort != valuesDict['InfluxHTTPPort']:
-				self.InfluxHTTPPort = valuesDict['InfluxHTTPPort']
-				InfluxServerChanged = True
-
-			# Here we have to detect if the admin accounts had changed
-			if ExternalInfluxDBServerChanged or valuesDict['InfluxUser'] != self.InfluxUser or self.InfluxPassword != valuesDict['InfluxPassword'] or not self.configured:
-				if not self.configured and not self.ExternalDB:
-					self.logger.info("first time setup -- config will now be created for InfluxDB.  The InfluxDB server will restart a few times, once that is complete, Grafana will start.")
-				elif not self.ExternalDB:
-					self.logger.info("config for influx admin account has changed.  Will remove the old admin and create the new.  The server will restart a few times.")
-
-				InfluxServerChanged = True
-
-				if not self.ExternalDB:
-					self.triggerInfluxAdminReset = True
-					self.pollingInterval = FAST_POLLING_INTERVAL
-					self.DeleteInfluxAdmin(self.InfluxUser)
-
-				self.InfluxUser = valuesDict['InfluxUser']
-				self.InfluxPassword = valuesDict['InfluxPassword']
-	
-			if self.InfluxDB != valuesDict['InfluxDB']:
-				self.InfluxDB = valuesDict['InfluxDB']
-				InfluxServerChanged = True
-
-			if self.InfluxDataLocation != valuesDict["InfluxDataLocation"]:
-				self.InfluxDataLocation = valuesDict["InfluxDataLocation"]
-				InfluxServerChanged = True
-
-			if self.GrafanaDataLocation != valuesDict["GrafanaDataLocation"]:
-				self.GrafanaDataLocation = valuesDict["GrafanaDataLocation"]
-				GrafanaServerChanged = True
-
-			if self.GrafanaAnonymous != valuesDict["GrafanaAnonymous"]:
-				self.GrafanaAnonymous = valuesDict["GrafanaAnonymous"]
-				GrafanaServerChanged = True
-
-			if self.GrafanaPort != valuesDict["GrafanaPort"]:
-				self.GrafanaPort = valuesDict["GrafanaPort"]
-				GrafanaServerChanged = True
-
-			if self.DisableGrafana != valuesDict["DisableGrafana"]:
-				if self.GrafanaServerStatus == "started":
-					self.StopGrafanaServer()
-
-				self.DisableGrafana = valuesDict["DisableGrafana"]
-
-				if not self.DisableGrafana:
-					GrafanaServerChanged = True
-
-			if not self.DisableGrafana and self.GrafanaServerStatus == "stopped":
-				GrafanaServerChanged = True
+			# Update retention policy if changed
+			if self.InfluxRetention != valuesDict.get('InfluxRetention', 6):
+				self.InfluxRetention = valuesDict.get('InfluxRetention', 6)
+				ConnectionChanged = True
 
 			self.configured = True
 
-			if InfluxServerChanged and not self.ExternalDB:
-				self.logger.debug("identified that config properties for the InfluxDB Server have changed")
-				self.CreateInfluxConfig()
-				self.triggerInfluxRestart = True
-
-			if GrafanaServerChanged:
-				self.logger.debug("identified that config properties for the Grafana Server have changed")
-				self.CreateGrafanaConfig()
-				self.triggerGrafanaRestart = True
-
-			# if a change was made to the Influx credentials and we are using a external server, simply reconnect
-			if self.ExternalDB and InfluxServerChanged:
+			# Reconnect if settings changed
+			if ConnectionChanged:
+				self.logger.info("InfluxDB connection settings changed, reconnecting...")
 				self.StopConnectionAttempts = False
 				self.QuietConnectionError = False
 				self.connect()
 
+			# Update minimum update frequency
 			if valuesDict["MinimumUpdateFrequency"] == "smart":
 				self.miniumumUpdateFrequency = "smart"
 			else:
 				self.miniumumUpdateFrequency = int(valuesDict["MinimumUpdateFrequency"])
 
-			# Reset the Exclude List to the selected devices that are selected in the list box
+			# Update device exclude list
 			self.DeviceExcludeList = []
 			for dev in valuesDict["listExclDevices"]:
 				self.DeviceExcludeList.append(int(dev))
 
+			# Save preferences
 			self.pluginPrefs["listIncStates"] = self.StatesIncludeList
 			self.pluginPrefs["listIncDevices"] = self.DeviceIncludeList
 			self.pluginPrefs["listExclDevices"] = self.DeviceExcludeList
@@ -1671,16 +1021,6 @@ class Plugin(indigo.PluginBase):
 						counter = counter + 1
 
 		return valuesDict
-
-	def rebuildInflux(self):
-		self.logger.info("rebuilding the InfluxDB server (will not delete data).  This occurs when the plugin is updated or if you've asked to manually rebuild the InfluxDB server.  The InfluxDB server will restart several times for this process to complete.")
-		self.triggerInfluxRestart = True
-		self.CreateInfluxAdmin()
-
-	def rebuildGrafana(self):
-		self.logger.info("rebuilding the Grafana server (will not delete data).  This occurs when the plugin is updated or if you've asked to manually rebuild the Grafana server.  The Grafana server will restart once this is complete.")
-		self.triggerGrafanaRestart = True
-		self.CreateGrafanaConfig()
 
 	def resetDataFilters(self):
 		self.logger.info("resetting data filters")

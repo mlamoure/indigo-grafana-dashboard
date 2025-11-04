@@ -1,0 +1,28 @@
+# InfluxDB Data Logger for Indigo - Python Dependencies
+# Version: 2025.0.0
+# Compatible with: Indigo 2025.1 (Python 3.11)
+
+# InfluxDB 1.x Python client (for InfluxDB 1.7/1.8 servers)
+influxdb==5.3.2
+
+# HTTP library (required by influxdb)
+requests==2.32.5
+urllib3>=1.21.1,<3
+certifi>=2017.4.17
+charset-normalizer>=2,<4
+idna>=2.5,<4
+
+# MessagePack serialization (used by influxdb for efficient data encoding)
+msgpack==1.1.2
+
+# Timezone support (required by influxdb for timestamp handling)
+pytz==2025.2
+
+# Installation Instructions:
+# ========================
+# These dependencies should be installed to the plugin's Server Plugin directory:
+#
+# cd "Grafana Home Dashboard.indigoPlugin/Contents/Server Plugin"
+# /Library/Application\ Support/Perceptive\ Automation/Indigo\ 2025.1/IndigoPluginHost.app/Contents/MacOS/Python3 -m pip install -r ../../requirements.txt --target .
+#
+# Or use Indigo's automatic package installation by placing this file in Contents/Packages/
