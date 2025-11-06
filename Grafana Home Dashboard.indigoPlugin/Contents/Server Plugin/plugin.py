@@ -7,8 +7,9 @@ import indigo
 import datetime
 import time
 import json
-import copy
 import os
+from dataclasses import dataclass
+from typing import Set
 from json_adaptor import JSONAdaptor
 from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError
@@ -21,10 +22,34 @@ UPDATE_STATES_LIST = 15 # how frequently (in minutes) to update the state list
 DEFAULT_UPDATE_FREQUENCY = 24 # frequency of update check, in hours
 MAX_LOG_FILE_OUTPUT_LINES = 50
 LOG_PRUNE_FREQUENCY = 24 # how frequently to prune the logs to the MAX_LOG_FILE_OUTPUT_LINES length
+MAX_INFLUX_WRITE_RETRIES = 5  # Maximum retries for InfluxDB write operations
+MAX_CONNECTION_RETRIES = 10  # Switch to long polling interval after this many connection failures
 
 DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
-class InfluxFilter(object):
+# Type converter mapping (replaces eval() for security)
+TYPE_CONVERTERS = {
+	'int': int,
+	'str': str,
+	'float': float,
+	'integer': int,  # InfluxDB sometimes returns "integer"
+	'string': str    # InfluxDB sometimes returns "string"
+}
+
+@dataclass
+class InfluxFilter:
+	"""Filter configuration for InfluxDB data validation"""
+	state: str
+	filterStrategy: str  # "minMax" or "percentChanged"
+	minValue: float
+	maxValue: float
+	maxPercent: float
+	allDevices: bool
+	appliedDevices: Set[int]
+	lockMinimumUpdates: bool
+	log: bool
+	name: str = ""
+
 	def __init__(self, state, filterStrategy, minValue, maxValue, maxPercent, allDevices, appliedDevices, lockMinimumUpdates, log):
 		self.state = state
 		self.filterStrategy = filterStrategy
@@ -32,26 +57,21 @@ class InfluxFilter(object):
 		self.maxValue = float(maxValue)
 		self.maxPercent = float(maxPercent)
 		self.allDevices = allDevices
-		self.appliedDevices = list(map(int, appliedDevices))
+		# Use set for O(1) lookup performance instead of list O(n)
+		self.appliedDevices = set(map(int, appliedDevices))
 		self.lockMinimumUpdates = lockMinimumUpdates
 		self.log = log
 
-		if self.allDevices:
-			self.appliesToString = "all devices"
-		else:
-			self.appliesToString = "specific devices"
+		# Generate appliesToString for logging
+		self.appliesToString = "all devices" if self.allDevices else "specific devices"
 
-		if self.allDevices:
-			appliesto = "(all devices)"
-		else:
-			appliesto = "(specific devices)"
-
+		# Generate default name if not provided
+		appliesto = "(all devices)" if self.allDevices else "(specific devices)"
 		if self.filterStrategy == "minMax":
-			values = "min: " + str(self.minValue) + ", max: " + str(self.maxValue)
+			values = f"min: {self.minValue}, max: {self.maxValue}"
 		else:
-			values = "percent: " + str(self.maxPercent)
-
-		self.name = self.state + " " + appliesto + " " + values
+			values = f"percent: {self.maxPercent}"
+		self.name = f"{self.state} {appliesto} {values}"
 
 class Plugin(indigo.PluginBase):
 	def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
@@ -81,7 +101,13 @@ class Plugin(indigo.PluginBase):
 		self.folders = {}
 		self.pollingInterval = DEFAULT_POLLING_INTERVAL
 		self.connected = False
-		self.FilterLogFileLoc = os.getcwd() + '/filter.log'
+
+		# Set filter log location in plugin-specific directory
+		log_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support',
+		                       'Perceptive Automation', 'Indigo 2025.1', 'Logs',
+		                       'com.vtmikel.grafana')
+		os.makedirs(log_dir, exist_ok=True)
+		self.FilterLogFileLoc = os.path.join(log_dir, 'filter.log')
 
 		self.LastConfigRefresh = datetime.datetime.now()
 
@@ -99,9 +125,9 @@ class Plugin(indigo.PluginBase):
 			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
 
 			if self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60) == "smart":
-				self.miniumumUpdateFrequency = "smart"
+				self.minimumUpdateFrequency = "smart"
 			else:
-				self.miniumumUpdateFrequency = int(self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60))
+				self.minimumUpdateFrequency = int(self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60))
 
 			# Debug Preferences
 			self.debug = self.pluginPrefs.get("ServerDebug", False)
@@ -125,7 +151,8 @@ class Plugin(indigo.PluginBase):
 						newFilter = InfluxFilter(item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8])
 						try:
 							newFilter.name = item[9]
-						except:
+						except (IndexError, KeyError):
+							# Filter name is optional (item[9]), ignore if not present
 							pass
 
 						self.FilterList.append(newFilter)
@@ -135,12 +162,12 @@ class Plugin(indigo.PluginBase):
 					for item in preferencesFilterList:
 						newFilter = InfluxFilter(item[0], item[1], item[2], item[3], item[4], item[5], item[6], True, item[7])
 						self.FilterList.append(newFilter)
-		
+
 					self.SaveFiltersToPreferences()
 
-			except:
-				self.logger.error("there was an error loading/upgrading your filters.  Please check the filters configuration to correct.")
-				pass
+			except (IndexError, KeyError, ValueError, TypeError) as e:
+				self.logger.error(f"there was an error loading/upgrading your filters: {e}. Please check the filters configuration to correct.")
+				self.logger.debug(f"Filter list data: {preferencesFilterList}")
 
 			# sets the default include states when the plugin has never been configured.
 			if len(self.StatesIncludeList) == 0:
@@ -236,9 +263,9 @@ class Plugin(indigo.PluginBase):
 			elif not self.QuietConnectionError:
 				self.logger.error("error while connecting to InfluxDB, will continue to try silently in the background.")
 				self.QuietConnectionError = True
-			elif self.ConnectionRetryCount > 10:
+			elif self.ConnectionRetryCount > MAX_CONNECTION_RETRIES:
 				self.pollingInterval = LONG_POLLING_INTERVAL
-				self.logger.error("error while connecting to InfluxDB after " + str(self.ConnectionRetryCount) + " attempts, will now attempt silently every 15 minutes.  Most recent connection error: " + str(e))
+				self.logger.error(f"error while connecting to InfluxDB after {self.ConnectionRetryCount} attempts, will now attempt silently every 15 minutes.  Most recent connection error: {e}")
 
 		self.logger.debug("completed connect()")
 
@@ -256,7 +283,7 @@ class Plugin(indigo.PluginBase):
 		]
 
 		# don't like my types? ok, fine, what DO you want?
-		retrylimit = 30
+		retrylimit = MAX_INFLUX_WRITE_RETRIES
 		unsent = True
 		while unsent and retrylimit > 0:
 			retrylimit -= 1
@@ -271,19 +298,23 @@ class Plugin(indigo.PluginBase):
 					field = json.loads(e.content)['error'].split('"')[1]
 					#measurement = json.loads(e.content)['error'].split('"')[3]
 					retry = json.loads(e.content)['error'].split('"')[4].split()[7]
-					if retry == 'integer':
-						retry = 'int'
-					if retry == 'string':
-						retry = 'str'
-					# float is already float
-					# now we know to try to force this field to this type forever more
+
+					# Store the type for future reference
 					self.adaptor.typecache[field] = retry
 
-					newcode = '%s("%s")' % (retry, str(json_body[0]['fields'][field]))
-					#self.logger.info(newcode)
-					json_body[0]['fields'][field] = eval(newcode)
-				except:
-					pass
+					# Use safe type converter instead of eval()
+					converter = TYPE_CONVERTERS.get(retry)
+					if converter:
+						try:
+							json_body[0]['fields'][field] = converter(str(json_body[0]['fields'][field]))
+						except (ValueError, TypeError) as conv_err:
+							self.logger.debug(f"Could not convert field {field} to {retry}: {conv_err}")
+					else:
+						self.logger.debug(f"Unknown type converter requested: {retry}")
+				except (KeyError, IndexError, AttributeError) as parse_err:
+					self.logger.debug(f"Could not parse InfluxDB error response: {parse_err}")
+				except Exception as e:
+					self.logger.debug(f"Unexpected error during type conversion: {e}")
 			except ValueError:
 				self.logger.debug("unable to force a field to the type in Influx - a partial record was still written")
 			except Exception as e:
@@ -352,13 +383,13 @@ class Plugin(indigo.PluginBase):
 					found = True
 					locked = devSearch[2]
 
-					if self.miniumumUpdateFrequency == "smart" and ((datetime.datetime.now().hour == 0 and datetime.datetime.now().minute < 15) or (datetime.datetime.now().hour == 23 and datetime.datetime.now().minute > 45)) and devSearch[1] + datetime.timedelta(minutes=5) < datetime.datetime.now() and not locked:
+					if self.minimumUpdateFrequency == "smart" and ((datetime.datetime.now().hour == 0 and datetime.datetime.now().minute < 15) or (datetime.datetime.now().hour == 23 and datetime.datetime.now().minute > 45)) and devSearch[1] + datetime.timedelta(minutes=5) < datetime.datetime.now() and not locked:
 						if self.TransportDebug:
 							self.logger.debug("    SMART minimum update period for device expired: " + dev.name + ", prior update timestamp: " + str(devSearch[1]))
 
 						needsUpdating = True
 						devSearch[1] = datetime.datetime.now()
-					elif devSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now() and not locked:
+					elif devSearch[1] + datetime.timedelta(minutes=self.minimumUpdateFrequency) < datetime.datetime.now() and not locked:
 						if self.TransportDebug:
 							self.logger.debug("    minimum update period for device expired: " + dev.name + ", prior update timestamp: " + str(devSearch[1]))
 
@@ -390,14 +421,14 @@ class Plugin(indigo.PluginBase):
 				if varSearch[0] == var.id:
 					found = True
 
-					if self.miniumumUpdateFrequency == "smart" and ((datetime.datetime.now().hour == 0 and datetime.datetime.now().minute < 15) or (datetime.datetime.now().hour == 23 and datetime.datetime.now().minute > 45)) and varSearch[1] + datetime.timedelta(minutes=5) < datetime.datetime.now():
+					if self.minimumUpdateFrequency == "smart" and ((datetime.datetime.now().hour == 0 and datetime.datetime.now().minute < 15) or (datetime.datetime.now().hour == 23 and datetime.datetime.now().minute > 45)) and varSearch[1] + datetime.timedelta(minutes=5) < datetime.datetime.now():
 						if self.TransportDebug:
 							self.logger.debug("    SMART minimum update period for variable expired: " + var.name + ", prior update timestamp: " + str(varSearch[1]))
 
 						needsUpdating = True
 						varSearch[1] = datetime.datetime.now()
 					
-					elif varSearch[1] + datetime.timedelta(minutes=self.miniumumUpdateFrequency) < datetime.datetime.now():
+					elif varSearch[1] + datetime.timedelta(minutes=self.minimumUpdateFrequency) < datetime.datetime.now():
 						if self.TransportDebug:
 							self.logger.debug("    minimum update period for variable expired: " + var.name + ", prior update timestamp: " + str(varSearch[1]))
 
@@ -479,8 +510,8 @@ class Plugin(indigo.PluginBase):
 
 		# Advanced data filtering processing section
 		if len(self.FilterList) > 0:
-			filterjson = copy.deepcopy(newjson)
-			for kk, vv in filterjson.items():
+			keys_to_delete = []  # Track keys to delete instead of using expensive deepcopy
+			for kk, vv in newjson.items():
 				for influxFilterRecord in self.FilterList:
 					passedFilter = True
 					try:
@@ -552,8 +583,13 @@ class Plugin(indigo.PluginBase):
 						else:
 							self.logger.debug(logLine)
 
-						del newjson[kk]
+						keys_to_delete.append(kk)
 						break # stop processing filter rules.
+
+			# Delete filtered keys after iteration to avoid dictionary size change during iteration
+			for key in keys_to_delete:
+				if key in newjson:
+					del newjson[key]
 
 		### END Advanced data filtering section
 
@@ -652,9 +688,9 @@ class Plugin(indigo.PluginBase):
 
 			# Update minimum update frequency
 			if valuesDict["MinimumUpdateFrequency"] == "smart":
-				self.miniumumUpdateFrequency = "smart"
+				self.minimumUpdateFrequency = "smart"
 			else:
-				self.miniumumUpdateFrequency = int(valuesDict["MinimumUpdateFrequency"])
+				self.minimumUpdateFrequency = int(valuesDict["MinimumUpdateFrequency"])
 
 			# Update device exclude list
 			self.DeviceExcludeList = []
@@ -699,7 +735,8 @@ class Plugin(indigo.PluginBase):
 					try:
 						index = -1
 						index = [y[0] for y in self.FullStateList].index(item)
-					except:
+					except ValueError:
+						# State not found in FullStateList
 						index = -1
 
 					if index != -1:
@@ -761,7 +798,8 @@ class Plugin(indigo.PluginBase):
 				try:
 					index = -1
 					index = [y[0] for y in self.FullStateList].index(kk)
-				except:
+				except ValueError:
+					# State not found in FullStateList
 					index = -1
 
 				if index == -1:
@@ -797,9 +835,8 @@ class Plugin(indigo.PluginBase):
 		for item in self.DeviceIncludeList:
 			try:
 				self.DeviceIncludeListUI.append((int(item), indigo.devices[int(item)].name.replace(",", " ").replace(";", " ")))
-			except:
-				self.logger.error("could not find device " + item + " to add to the InfluxDB device list")
-				pass
+			except (KeyError, ValueError) as e:
+				self.logger.error(f"could not find device {item} to add to the InfluxDB device list: {e}")
 
 		# BUILD UI LISTS  -- EXCLUDE
 		self.DeviceListExcludeListUI = []
@@ -807,9 +844,8 @@ class Plugin(indigo.PluginBase):
 		for item in self.DeviceExcludeList:
 			try:
 				self.DeviceListExcludeListUI.append((item, indigo.devices[int(item)].name.replace(",", " ").replace(";", " ")))
-			except:
-				self.logger.error("could not find device " + item + " to add to the InfluxDB exclude device list")
-				pass
+			except (KeyError, ValueError) as e:
+				self.logger.error(f"could not find device {item} to add to the InfluxDB exclude device list: {e}")
 
 		self.logger.debug("completed BuildConfigurationLists()")
 
@@ -890,8 +926,8 @@ class Plugin(indigo.PluginBase):
 
 			try:
 				self.DeviceIncludeList.remove(indigodev.id)
-			except:
-				self.logger.error("error while removing device from the inclusion list")
+			except ValueError as e:
+				self.logger.error(f"error while removing device from the inclusion list: {e}")
 
 			self.DeviceIncludeListUI = [item for item in self.DeviceIncludeListUI if item[0] != indigodev.id]
 
@@ -917,8 +953,8 @@ class Plugin(indigo.PluginBase):
 
 			try:
 				self.StatesIncludeList.remove(state)
-			except:
-				self.logger.error("error while removing state from inclusion list")
+			except ValueError as e:
+				self.logger.error(f"error while removing state from inclusion list: {e}")
 
 			for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
 				if ui[0] == state:
@@ -974,14 +1010,7 @@ class Plugin(indigo.PluginBase):
 						status = " (NOT INCLUDED)"
 
 					# Value conversion
-					value = None
-
-					if isinstance(vv, str):
-						value = vv
-					elif isinstance(vv, str):
-						value = vv.encode('utf-8')
-					else:
-						value = str(vv)
+					value = str(vv) if not isinstance(vv, str) else vv
 
 					self.logger.info("   " + str(kk) + ": " + value + status)
 
@@ -1009,14 +1038,7 @@ class Plugin(indigo.PluginBase):
 							status = " (NOT INCLUDED)"
 
 						# Value conversion
-						value = None
-
-						if isinstance(vv, str):
-							value = vv
-						elif isinstance(vv, str):
-							value = vv.encode('utf-8')
-						else:
-							value = str(vv)
+						value = str(vv) if not isinstance(vv, str) else vv
 
 						self.logger.info("   " + str(counter) + ". " + dev.name + " ;  " + str(kk) + ": " + value + status)
 						counter = counter + 1
@@ -1163,7 +1185,9 @@ class Plugin(indigo.PluginBase):
 		toSave = []
 
 		for influxFilterRecord in self.FilterList:
-			toSave.append([influxFilterRecord.state, influxFilterRecord.filterStrategy, influxFilterRecord.minValue, influxFilterRecord.maxValue, influxFilterRecord.maxPercent, influxFilterRecord.allDevices, influxFilterRecord.appliedDevices, influxFilterRecord.lockMinimumUpdates, influxFilterRecord.log, influxFilterRecord.name])
+			# Convert set back to list for JSON serialization
+			applied_devices_list = list(influxFilterRecord.appliedDevices) if isinstance(influxFilterRecord.appliedDevices, set) else influxFilterRecord.appliedDevices
+			toSave.append([influxFilterRecord.state, influxFilterRecord.filterStrategy, influxFilterRecord.minValue, influxFilterRecord.maxValue, influxFilterRecord.maxPercent, influxFilterRecord.allDevices, applied_devices_list, influxFilterRecord.lockMinimumUpdates, influxFilterRecord.log, influxFilterRecord.name])
 
 		self.pluginPrefs["listFilterList"] = toSave
 		self.pluginPrefs["preferencesFilterVersion"] = "2.0.0"
@@ -1202,11 +1226,11 @@ class Plugin(indigo.PluginBase):
 				filterDevices = valuesDict["listDevices"]
 	
 			log = valuesDict["logFailures"]
-		except ValueError:
-			self.logger.error("Ensure that filter max and min values must be numeric")
+		except ValueError as e:
+			self.logger.error(f"Ensure that filter max and min values must be numeric: {e}")
 			return valuesDict
-		except:
-			self.logger.error("Error validating the form.  Ensure that filter max and min values must be numeric, and all fields are filled in.")
+		except (KeyError, TypeError) as e:
+			self.logger.error(f"Error validating the form.  Ensure that filter max and min values must be numeric, and all fields are filled in: {e}")
 			return valuesDict
 
 		if filterStrategy == "minMax" and filterPropertyMinValue >= filterPropertyMaxValue:

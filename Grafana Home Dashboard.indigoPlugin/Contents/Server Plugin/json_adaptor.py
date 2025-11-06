@@ -6,13 +6,22 @@ import json
 import indigo
 from enum import Enum
 
+# Type converter mapping (replaces eval() for security)
+TYPE_CONVERTERS = {
+	'int': int,
+	'str': str,
+	'float': float,
+	'integer': int,  # InfluxDB sometimes returns "integer"
+	'string': str    # InfluxDB sometimes returns "string"
+}
+
 # explicit changes
 def indigo_json_serial(obj):
 	"""JSON serializer for objects not serializable by default json code"""
 	#indigo.server.log(unicode(obj))
 	if isinstance(obj, (datetime, date)):
-		ut = time_.mktime(obj.timetuple())
-		return int(ut)
+		# Use timestamp() for consistent conversion (includes timezone info)
+		return int(obj.timestamp())
 	if isinstance(obj, indigo.Dict):
 		dd = {}
 		for key,value in obj.items():
@@ -39,6 +48,7 @@ class JSONAdaptor():
 
 		# remember previous states for diffing, smaller databases
 		self.cache = {}
+		self.cache_max_size = 1000  # Limit cache to prevent unbounded growth
 		# remember column name/type mappings to reduce exceptions
 		self.typecache = {}
 
@@ -72,10 +82,9 @@ class JSONAdaptor():
 				elif isinstance(invalue, int):
 					# convert ALL numbers to floats for influx
 					value = float(invalue)
-				# convert datetime to timestamps of another flavor
+				# convert datetime to Unix timestamp (consistent with indigo_json_serial)
 				elif isinstance(invalue, (datetime, date)):
-					value = time_.mktime(invalue.timetuple())
-					#value = int(ut)
+					value = invalue.timestamp()
 				# explicitly change enum values to strings
 				# TODO find a more reliable way to change enums to strings
 				elif invalue.__class__.__bases__[0].__name__ == 'enum':
@@ -143,14 +152,16 @@ class JSONAdaptor():
 		# try to honor previous complaints about column types
 		for key in list(self.typecache.keys()):
 			if key in list(newjson.keys()):
-				try:
-					newjson[key] = eval( '%s("%s")' % (self.typecache[key], str(newjson[key])))
-				except ValueError:
-					self.logger.debug('One of the columns just will not convert to the requested type. Partial record written.')
-					pass
-				except Exception as e:
-					self.logger.debug('Unknown problem.  Partial record written.  Error:' + str(e))
-					pass
+				converter = TYPE_CONVERTERS.get(self.typecache[key])
+				if converter:
+					try:
+						newjson[key] = converter(str(newjson[key]))
+					except (ValueError, TypeError):
+						self.logger.debug('One of the columns just will not convert to the requested type. Partial record written.')
+					except Exception as e:
+						self.logger.debug('Unknown problem.  Partial record written.  Error:' + str(e))
+				else:
+					self.logger.debug(f'Unknown type converter requested: {self.typecache[key]}')
 
 		return newjson
 
@@ -180,7 +191,8 @@ class JSONAdaptor():
 								self.logger.debug('NOT sending property: ' + kk + " to InfluxDB for device: " + device.name + " because the value NOT has changed.  Prev value: " + str(localcache[kk]) + ", new value: " + str(vv))
 
 							continue
-					except:
+					except (AttributeError, UnicodeDecodeError):
+						# Encoding comparison failed, treat as changed
 						pass
 
 				# either the key is in the include states, the entire device needs to be sent
@@ -194,7 +206,8 @@ class JSONAdaptor():
 									self.logger.debug('sending property: ' + kk + " to InfluxDB for device: " + device.name + " because the value has changed.  Prev value: " + str(localcache[kk]) + ", new value: " + str(vv))
 								else:
 									self.logger.debug('sending property: ' + kk + " to InfluxDB for device: " + device.name + " because the value has changed.  Prev value: <no previous value>, new value: " + str(vv))
-							except:
+							except (AttributeError, UnicodeDecodeError):
+								# Debug logging failed, continue anyway
 								pass
 
 						hasUpdate = True
@@ -206,6 +219,12 @@ class JSONAdaptor():
 			return None
 			
 		if not device.name in list(self.cache.keys()):
+			# Implement simple cache eviction: remove oldest entry if cache is full
+			if len(self.cache) >= self.cache_max_size:
+				# Remove the first (oldest) entry
+				oldest_key = next(iter(self.cache))
+				del self.cache[oldest_key]
+				self.logger.debug(f"Cache full, evicted oldest entry: {oldest_key}")
 			self.cache[device.name] = {}
 		self.cache[device.name].update(newjson)
 
