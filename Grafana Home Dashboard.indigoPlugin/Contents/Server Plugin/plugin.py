@@ -240,8 +240,7 @@ class Plugin(indigo.PluginBase):
 				self.logger.debug("    error while setting the retention policy: " + str(e))
 
 			# Always show connection success message (no bundled server in v2025.0.0+)
-			if self.debug or self.QuietConnectionError:
-				self.logger.info("######## connected to InfluxDB successfully... plugin will now resume logging data to InfluxDB ########")
+			self.logger.info("######## connected to InfluxDB successfully... plugin will now resume logging data to InfluxDB ########")
 
 			self.ConnectionRetryCount = 0
 			self.connected = True
