@@ -129,7 +129,7 @@ python restart_indigo_plugin.py "/path/to/Grafana Home Dashboard.indigoPlugin"
 python restart_indigo_plugin.py com.vtmikel.grafana
 ```
 
-### Releasing to GitHub
+### Releasing
 ```bash
 cd /Users/mike/Mike_Sync_Documents/Programming/mike-local-development-scripts
 source .venv/bin/activate.fish
@@ -143,20 +143,37 @@ cat > /tmp/release_notes.md << 'EOF'
 - List fixes here
 EOF
 
-# Create release (fully automated, attaches clean zip without Contents/Packages)
+# Create release on BOTH GitHub and Gitea (auto-detected if 'local_gitea' remote exists)
 ./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" -y --notes-file /tmp/release_notes.md
 
-# Or create draft for review first
+# GitHub only (skip Gitea)
+./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" -y --no-gitea --notes-file /tmp/release_notes.md
+
+# Gitea only (skip GitHub)
+./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" -y --gitea-only --notes-file /tmp/release_notes.md
+
+# Recover from a botched release: re-attach the zip to an existing tag
+# without re-creating the tag, push, or release notes
+./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" -y --attach-only v2026.1.0
+
+# Draft for review first
 ./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" --draft --notes-file /tmp/release_notes.md -y
 ```
 
-**Release Script Features**:
-- Auto-extracts version from `Info.plist`
+**Release Script Features** (as of 2026-05-02):
+- Auto-extracts version from `Info.plist` via the shared `lib/plist.sh` helper
 - Creates git tag (v{version})
 - Packages plugin using `package_indigo_plugin_for_release.sh`
 - Removes `Contents/Packages` and `.gitignore` files from release zip
-- Creates GitHub release with clean package
-- Use `--dry-run` to preview without executing
+- Auto-detects `local_gitea` remote and publishes there alongside GitHub
+- `--attach-only <tag>` recovery mode for re-uploading without re-creating the release
+- `--dry-run` to preview without executing
+- Gitea token is pulled from Vault (`claude/api-tokens/gitea`) automatically;
+  override with `GITEA_TOKEN` env var if you need a one-off
+- Override `GITEA_API_BASE` env var to point at a non-default Gitea host
+- Override package destination with `INDIGO_RELEASE_DIR` env var
+
+**New exit code**: `6` — Gitea-specific failure (network, API, or token).
 
 ## Common Constants (plugin.py)
 
