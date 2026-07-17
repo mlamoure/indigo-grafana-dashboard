@@ -29,6 +29,15 @@
 				<Description>Enable</Description>
 		</Field>
 
+		<Field id="InfluxV3Compat" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="checkbox" defaultValue="false">
+				<Label>InfluxDB 3 server</Label>
+				<Description>Server is InfluxDB 3 (v1-compat API)</Description>
+		</Field>
+
+	<Field id="v3CompatInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
+		<Label>For InfluxDB 3 reached via its v1 compatibility API: skips database/retention DDL (pre-provisioned, token-scoped servers) and omits fields that duplicate tag keys, which IOx rejects. Leave unchecked for InfluxDB 1.7/1.8 — behavior is unchanged.</Label>
+	</Field>
+
 	<Field id="httpPortInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
 		<Label>The HTTP port that the plugin will use to connect to your InfluxDB server (default: 8086)</Label>
 	</Field>

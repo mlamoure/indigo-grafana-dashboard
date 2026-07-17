@@ -123,6 +123,9 @@ class Plugin(indigo.PluginBase):
 			self.InfluxPassword = self.pluginPrefs.get('InfluxPassword', 'indigo')
 			self.InfluxDB = self.pluginPrefs.get('InfluxDB', 'indigo')
 			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
+			# Opt-in InfluxDB 3 (v1-compat API) mode; default preserves exact
+			# InfluxDB 1.x behavior for existing installs.
+			self.InfluxV3Compat = self.pluginPrefs.get('InfluxV3Compat', False)
 
 			if self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60) == "smart":
 				self.minimumUpdateFrequency = "smart"
@@ -224,27 +227,26 @@ class Plugin(indigo.PluginBase):
 			)
 
 		try:
-			# Best-effort: pre-provisioned servers (e.g. InfluxDB 3 via the
-			# v1-compat API) reject /query DDL from this client (400 invalid
-			# mime type), and scoped tokens lack DDL rights. Writes are
-			# unaffected; a truly missing database still fails on first write.
-			try:
-				self.connection.create_database(self.InfluxDB)
-			except Exception as e:
-				self.logger.debug("    create_database skipped: " + str(e))
-			self.connection.switch_database(self.InfluxDB)
-
-			if self.InfluxRetention == -1:
-				retain = "INF"
+			if self.InfluxV3Compat:
+				# InfluxDB 3 (v1-compat API): the server is pre-provisioned and
+				# rejects this client's /query DDL calls (400 invalid mime
+				# type); retention is managed server-side. Skip both DDL calls.
+				self.connection.switch_database(self.InfluxDB)
 			else:
-				retain = str(int(self.InfluxRetention) * 30) + "d"
+				self.connection.create_database(self.InfluxDB)
+				self.connection.switch_database(self.InfluxDB)
 
-			self.logger.debug("    setting Influx retention policy of: " + retain)
+				if self.InfluxRetention == -1:
+					retain = "INF"
+				else:
+					retain = str(int(self.InfluxRetention) * 30) + "d"
 
-			try:
-				self.connection.create_retention_policy('indigo_policy', retain, '1')
-			except Exception as e:
-				self.logger.debug("    error while setting the retention policy: " + str(e))
+				self.logger.debug("    setting Influx retention policy of: " + retain)
+
+				try:
+					self.connection.create_retention_policy('indigo_policy', retain, '1')
+				except Exception as e:
+					self.logger.debug("    error while setting the retention policy: " + str(e))
 
 			# Always show connection success message (no bundled server in v2025.0.0+)
 			self.logger.info("######## connected to InfluxDB successfully... plugin will now resume logging data to InfluxDB ########")
@@ -280,13 +282,14 @@ class Plugin(indigo.PluginBase):
 		if not self.connected:
 			return
 
-		# IOx-based servers (InfluxDB 3) require a column to be a tag XOR a
-		# field. Drop fields that duplicate a tag key (e.g. device 'name') —
-		# InfluxDB 1.x silently accepted the overlap. A point left with no
-		# fields carries no information beyond its tags; skip it.
-		what = {k: v for k, v in what.items() if k not in tags}
-		if not what:
-			return
+		if self.InfluxV3Compat:
+			# IOx-based servers (InfluxDB 3) require a column to be a tag XOR
+			# a field. Drop fields that duplicate a tag key (e.g. device
+			# 'name') — InfluxDB 1.x silently accepted the overlap. A point
+			# left with no fields carries nothing beyond its tags; skip it.
+			what = {k: v for k, v in what.items() if k not in tags}
+			if not what:
+				return
 
 		json_body=[
 			{
