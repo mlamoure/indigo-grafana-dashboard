@@ -280,6 +280,14 @@ class Plugin(indigo.PluginBase):
 		if not self.connected:
 			return
 
+		# IOx-based servers (InfluxDB 3) require a column to be a tag XOR a
+		# field. Drop fields that duplicate a tag key (e.g. device 'name') —
+		# InfluxDB 1.x silently accepted the overlap. A point left with no
+		# fields carries no information beyond its tags; skip it.
+		what = {k: v for k, v in what.items() if k not in tags}
+		if not what:
+			return
+
 		json_body=[
 			{
 				'measurement': measurement,
