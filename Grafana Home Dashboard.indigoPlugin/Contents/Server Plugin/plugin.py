@@ -224,7 +224,14 @@ class Plugin(indigo.PluginBase):
 			)
 
 		try:
-			self.connection.create_database(self.InfluxDB)
+			# Best-effort: pre-provisioned servers (e.g. InfluxDB 3 via the
+			# v1-compat API) reject /query DDL from this client (400 invalid
+			# mime type), and scoped tokens lack DDL rights. Writes are
+			# unaffected; a truly missing database still fails on first write.
+			try:
+				self.connection.create_database(self.InfluxDB)
+			except Exception as e:
+				self.logger.debug("    create_database skipped: " + str(e))
 			self.connection.switch_database(self.InfluxDB)
 
 			if self.InfluxRetention == -1:
