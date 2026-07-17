@@ -6,8 +6,10 @@
 import indigo
 import datetime
 import time
-import json
 import os
+import queue
+import re
+import threading
 from dataclasses import dataclass
 from typing import Set
 from json_adaptor import JSONAdaptor
@@ -24,8 +26,15 @@ MAX_LOG_FILE_OUTPUT_LINES = 50
 LOG_PRUNE_FREQUENCY = 24 # how frequently to prune the logs to the MAX_LOG_FILE_OUTPUT_LINES length
 MAX_INFLUX_WRITE_RETRIES = 5  # Maximum retries for InfluxDB write operations
 MAX_CONNECTION_RETRIES = 10  # Switch to long polling interval after this many connection failures
+INFLUX_BATCH_MAX = 500  # maximum points per write_points() call
+INFLUX_QUEUE_MAX = 10000  # bounded pending-write queue; new points are dropped when full
+INFLUX_FLUSH_INTERVAL = 1.0  # seconds the writer coalesces points before flushing a batch
 
 DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
+
+def to_bool(value):
+	"""Convert a string representation to a real boolean ('False' -> False)."""
+	return str(value).strip().lower() in ('true', 't', '1', 'yes', 'on')
 
 # Type converter mapping (replaces eval() for security)
 TYPE_CONVERTERS = {
@@ -33,7 +42,18 @@ TYPE_CONVERTERS = {
 	'str': str,
 	'float': float,
 	'integer': int,  # InfluxDB sometimes returns "integer"
-	'string': str    # InfluxDB sometimes returns "string"
+	'string': str,   # InfluxDB sometimes returns "string"
+	'bool': to_bool,
+	'boolean': to_bool
+}
+
+# InfluxDB 3 (IOx) column types as they appear in v1-compat error messages
+IOX_TYPE_MAP = {
+	'string': 'str',
+	'float': 'float',
+	'integer': 'int',
+	'unsigned': 'int',
+	'boolean': 'bool'
 }
 
 @dataclass
@@ -102,6 +122,14 @@ class Plugin(indigo.PluginBase):
 		self.pollingInterval = DEFAULT_POLLING_INTERVAL
 		self.connected = False
 
+		# Pending InfluxDB writes: producers (device/variable callbacks,
+		# UpdateAll) enqueue and never touch the network; a single writer
+		# thread batches them into write_points() calls (influxWriterLoop)
+		self.write_queue = queue.Queue(maxsize=INFLUX_QUEUE_MAX)
+		self.writer_thread = None
+		self.writer_stop = threading.Event()
+		self.lastQueueFullWarning = None
+
 		# Set filter log location in plugin-specific directory
 		log_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support',
 		                       'Perceptive Automation', 'Indigo 2025.1', 'Logs',
@@ -123,9 +151,15 @@ class Plugin(indigo.PluginBase):
 			self.InfluxPassword = self.pluginPrefs.get('InfluxPassword', 'indigo')
 			self.InfluxDB = self.pluginPrefs.get('InfluxDB', 'indigo')
 			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
-			# Opt-in InfluxDB 3 (v1-compat API) mode; default preserves exact
-			# InfluxDB 1.x behavior for existing installs.
-			self.InfluxV3Compat = self.pluginPrefs.get('InfluxV3Compat', False)
+			# InfluxDB version selection: "1" = InfluxDB 1.7/1.8 (default),
+			# "3" = InfluxDB 3 via its v1-compat API. Migrates the pre-2025.2.0
+			# InfluxV3Compat checkbox pref and persists the result so the
+			# config dialog shows the migrated selection.
+			self.InfluxVersion = str(self.pluginPrefs.get('InfluxVersion', ''))
+			if self.InfluxVersion not in ('1', '3'):
+				self.InfluxVersion = '3' if self.pluginPrefs.get('InfluxV3Compat', False) else '1'
+				self.pluginPrefs['InfluxVersion'] = self.InfluxVersion
+			self.InfluxV3Compat = self.InfluxVersion == '3'
 
 			if self.pluginPrefs.get("MinimumUpdateFrequency", DEFAULT_POLLING_INTERVAL/60) == "smart":
 				self.minimumUpdateFrequency = "smart"
@@ -185,6 +219,9 @@ class Plugin(indigo.PluginBase):
 			self.configured = False
 			pass
 
+		self.writer_thread = threading.Thread(target=self.influxWriterLoop, name="InfluxWriter", daemon=True)
+		self.writer_thread.start()
+
 		if self.configured:
 			self.connect()
 
@@ -195,6 +232,9 @@ class Plugin(indigo.PluginBase):
 
 	# called after runConcurrentThread() exits
 	def shutdown(self):
+		self.writer_stop.set()
+		if self.writer_thread is not None:
+			self.writer_thread.join(timeout=10)
 		if self.connection:
 			self.connection.close()
 		self.connected = False
@@ -230,7 +270,10 @@ class Plugin(indigo.PluginBase):
 			if self.InfluxV3Compat:
 				# InfluxDB 3 (v1-compat API): the server is pre-provisioned and
 				# rejects this client's /query DDL calls (400 invalid mime
-				# type); retention is managed server-side. Skip both DDL calls.
+				# type); retention is managed server-side. Skip both DDL calls,
+				# but ping so an unreachable server fails here rather than on
+				# the first write.
+				self.connection.ping()
 				self.connection.switch_database(self.InfluxDB)
 			else:
 				self.connection.create_database(self.InfluxDB)
@@ -277,7 +320,8 @@ class Plugin(indigo.PluginBase):
 
 		self.logger.debug("completed connect()")
 
-	# send this a dict of what to write
+	# send this a dict of what to write; enqueues for the writer thread so
+	# Indigo callbacks never block on the network
 	def SendToInflux(self, tags, what, measurement='device_changes'):
 		if not self.connected:
 			return
@@ -291,55 +335,143 @@ class Plugin(indigo.PluginBase):
 			if not what:
 				return
 
-		json_body=[
-			{
-				'measurement': measurement,
-				'tags' : tags,
-				'fields':  what
-			}
-		]
+		point = {
+			'measurement': measurement,
+			'tags': tags,
+			'fields': what,
+			# stamp client-side: batched points that shared a server-assigned
+			# timestamp would overwrite each other within a series
+			'time': datetime.datetime.now(datetime.timezone.utc)
+		}
+
+		try:
+			self.write_queue.put_nowait(point)
+		except queue.Full:
+			now = datetime.datetime.now()
+			if self.lastQueueFullWarning is None or now - self.lastQueueFullWarning > datetime.timedelta(seconds=60):
+				self.lastQueueFullWarning = now
+				self.logger.warning(f"InfluxDB write queue is full ({INFLUX_QUEUE_MAX} points); dropping new points until it drains")
+
+	def influxWriterLoop(self):
+		self.logger.debug("InfluxDB writer thread started")
+
+		while not self.writer_stop.is_set():
+			try:
+				batch = [self.write_queue.get(timeout=0.5)]
+			except queue.Empty:
+				continue
+
+			# coalesce whatever else arrives within the flush window into one
+			# write_points() call — InfluxDB 3 holds every write for its WAL
+			# flush (~1s), so per-point writes cap throughput at ~1 point/sec
+			deadline = time.monotonic() + INFLUX_FLUSH_INTERVAL
+			while len(batch) < INFLUX_BATCH_MAX and not self.writer_stop.is_set():
+				remaining = deadline - time.monotonic()
+				if remaining <= 0:
+					break
+				try:
+					batch.append(self.write_queue.get(timeout=remaining))
+				except queue.Empty:
+					break
+
+			self.writeBatch(batch)
+
+		# final drain so points captured just before shutdown still land
+		batch = []
+		while True:
+			try:
+				batch.append(self.write_queue.get_nowait())
+			except queue.Empty:
+				break
+			if len(batch) >= INFLUX_BATCH_MAX:
+				self.writeBatch(batch)
+				batch = []
+		if batch:
+			self.writeBatch(batch)
+
+		self.logger.debug("InfluxDB writer thread stopped")
+
+	def writeBatch(self, batch):
+		if not self.connected or self.connection is None:
+			return
 
 		# don't like my types? ok, fine, what DO you want?
 		retrylimit = MAX_INFLUX_WRITE_RETRIES
-		unsent = True
-		while unsent and retrylimit > 0:
+		while retrylimit > 0:
 			retrylimit -= 1
 			try:
-				self.connection.write_points(json_body)
-				unsent = False
+				self.connection.write_points(batch)
 				self.QuietConnectionError = False
+				return
 			except InfluxDBClientError as e:
 				self.logger.debug("Influx client error: " + str(e))
 
-				try:
-					field = json.loads(e.content)['error'].split('"')[1]
-					#measurement = json.loads(e.content)['error'].split('"')[3]
-					retry = json.loads(e.content)['error'].split('"')[4].split()[7]
-
-					# Store the type for future reference
-					self.adaptor.typecache[field] = retry
-
-					# Use safe type converter instead of eval()
-					converter = TYPE_CONVERTERS.get(retry)
-					if converter:
-						try:
-							json_body[0]['fields'][field] = converter(str(json_body[0]['fields'][field]))
-						except (ValueError, TypeError) as conv_err:
-							self.logger.debug(f"Could not convert field {field} to {retry}: {conv_err}")
-					else:
-						self.logger.debug(f"Unknown type converter requested: {retry}")
-				except (KeyError, IndexError, AttributeError) as parse_err:
-					self.logger.debug(f"Could not parse InfluxDB error response: {parse_err}")
-				except Exception as e:
-					self.logger.debug(f"Unexpected error during type conversion: {e}")
+				if not self.applyTypeCorrection(e, batch):
+					break  # nothing corrected; retrying the same payload is futile
 			except ValueError:
 				self.logger.debug("unable to force a field to the type in Influx - a partial record was still written")
+				return
 			except Exception as e:
 				self.connected = False
 				if not self.QuietConnectionError:
 					self.logger.error("error while trying to write to InfluxDB... please wait a moment, will work silently to correct in the background")
 					self.QuietConnectionError = True
 					self.logger.debug(str(e))
+				return
+
+		# the batch keeps failing: write per-point so one bad point can't
+		# take down the rest, and drop the ones that still fail
+		if len(batch) > 1:
+			for point in batch:
+				self.writeBatch([point])
+		else:
+			self.logger.debug("dropping InfluxDB point that could not be written: " + str(batch[0].get('measurement')) + " fields=" + str(sorted(batch[0].get('fields', {}).keys())))
+
+	# parse a type-conflict error (InfluxDB 1.x or 3 v1-compat formats), teach
+	# the adaptor's typecache, and coerce the offending field across the batch.
+	# Returns True when a retry is worthwhile.
+	def applyTypeCorrection(self, error, batch):
+		field = None
+		target = None
+		error_text = str(getattr(error, 'content', '') or error)
+
+		# InfluxDB 3 (IOx): "invalid column type for column 'x', expected
+		# iox::column_type::field::string, got iox::column_type::field::boolean"
+		match = re.search(r"column '([^']+)'.*?expected iox::column_type::field::(\w+)", error_text)
+		if match:
+			field = match.group(1)
+			target = IOX_TYPE_MAP.get(match.group(2))
+		else:
+			# InfluxDB 1.x: 'input field "x" on measurement "m" is type
+			# integer, already exists as type float'
+			match = re.search(r'input field "([^"]+)" on measurement "[^"]*" is type \w+, already exists as type (\w+)', error_text)
+			if match:
+				field = match.group(1)
+				target = match.group(2)
+
+		if not field or not target:
+			self.logger.debug("Could not parse InfluxDB error response: " + error_text[:300])
+			return False
+
+		# Store the type for future reference so to_json() coerces up-front
+		self.adaptor.typecache[field] = target
+
+		converter = TYPE_CONVERTERS.get(target)
+		if converter is None:
+			self.logger.debug(f"Unknown type converter requested: {target}")
+			return False
+
+		corrected = False
+		for point in batch:
+			fields = point.get('fields', {})
+			if field in fields:
+				try:
+					fields[field] = converter(str(fields[field]))
+					corrected = True
+				except (ValueError, TypeError) as conv_err:
+					self.logger.debug(f"Could not convert field {field} to {target}: {conv_err}")
+
+		return corrected
 
 
 	def runConcurrentThread(self):
@@ -371,9 +503,9 @@ class Plugin(indigo.PluginBase):
 
 		except self.StopThread:
 			self.logger.debug("Received StopThread")
-			if self.connection:
-				self.connection.close()
-			self.connected = False
+			# leave the connection open: the writer thread does a final drain;
+			# shutdown() joins it and then closes the connection
+			self.writer_stop.set()
 
 	def UpdateAll(self):
 
@@ -678,6 +810,7 @@ class Plugin(indigo.PluginBase):
 				self.InfluxUser != valuesDict['InfluxUser'] or
 				self.InfluxPassword != valuesDict['InfluxPassword'] or
 				self.InfluxDB != valuesDict['InfluxDB'] or
+				self.InfluxVersion != str(valuesDict.get('InfluxVersion', '1')) or
 				not self.configured):
 				ConnectionChanged = True
 
@@ -688,6 +821,8 @@ class Plugin(indigo.PluginBase):
 			self.InfluxUser = valuesDict['InfluxUser']
 			self.InfluxPassword = valuesDict['InfluxPassword']
 			self.InfluxDB = valuesDict['InfluxDB']
+			self.InfluxVersion = str(valuesDict.get('InfluxVersion', '1'))
+			self.InfluxV3Compat = self.InfluxVersion == '3'
 
 			# Update retention policy if changed
 			if self.InfluxRetention != valuesDict.get('InfluxRetention', 6):
