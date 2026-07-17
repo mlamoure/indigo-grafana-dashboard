@@ -7,7 +7,7 @@ An Indigo plugin that logs device and variable states to InfluxDB for visualizat
 
 ## Features
 
-* **InfluxDB Client**: Connects to your external InfluxDB 1.7 or 1.8 server
+* **InfluxDB Client**: Connects to your external InfluxDB 1.7/1.8 server, or InfluxDB 3 via its v1 compatibility API
 * **Granular Control**: Advanced inclusion/exclusion criteria to control which devices and states are logged
 * **Data Filtering**: Prevent erroneous values from being logged with min/max ranges and percentage change thresholds
 * **Smart Updates**: Configurable minimum update frequency to avoid gaps in graphs
@@ -24,6 +24,10 @@ An Indigo plugin that logs device and variable states to InfluxDB for visualizat
   - Docker: `docker run -p 8086:8086 -v /path/to/data:/var/lib/influxdb influxdb:1.8`
   - Homebrew: `brew install influxdb@1`
   - Download: https://portal.influxdata.com/downloads/
+* **or InfluxDB 3** (Core/Enterprise) reached through its v1 compatibility API
+  - Select "InfluxDB 3" in the plugin's InfluxDB Version dropdown
+  - The database must already exist and the credentials/token must have write access — the plugin does not create databases or retention policies on InfluxDB 3 (retention is managed server-side)
+  - For token auth, leave the username as configured on your server and supply the token as the password (v1-compat convention)
 * **Grafana** (for visualization, optional but recommended)
   - Docker: `docker run -p 3000:3000 grafana/grafana`
   - Homebrew: `brew install grafana`
@@ -43,11 +47,12 @@ Configure the connection to your InfluxDB server in the plugin configuration:
 
 * **InfluxDB Server Host**: Hostname or IP address of your InfluxDB server (e.g., `localhost`, `192.168.1.100`)
 * **Use SSL**: Enable if your InfluxDB server uses HTTPS
+* **InfluxDB Version**: InfluxDB 1.7/1.8 (default) or InfluxDB 3 (v1 compatibility API)
 * **InfluxDB HTTP Port**: HTTP API port (default: 8086)
 * **InfluxDB User**: Username for authentication
 * **InfluxDB Password**: Password for authentication
-* **InfluxDB Database**: Database name (will be created if it doesn't exist)
-* **Retention Policy**: How long to keep data (6 months, 1 year, 2 years, 5 years, or forever)
+* **InfluxDB Database**: Database name (created if it doesn't exist on InfluxDB 1.x; must already exist on InfluxDB 3)
+* **Retention Policy**: How long to keep data (6 months, 1 year, 2 years, 5 years, or forever) — applied on InfluxDB 1.x only; InfluxDB 3 retention is managed server-side
 
 ### Inclusion / Exclusion Criteria
 
@@ -121,6 +126,11 @@ AND time >= now() - 24h
 - **Fields**: `name`, `value`, `value.num` (if numeric)
 
 ## Version History
+
+### v2025.2.0 (InfluxDB 3 Support)
+- **InfluxDB Version dropdown**: choose InfluxDB 1.7/1.8 or InfluxDB 3 (v1 compatibility API) in the connection settings
+- **Asynchronous batched writes**: state changes are queued and written in batches on a background thread, so the plugin (and its config dialog) stays responsive even against servers with slow write acknowledgments
+- **Better type-conflict handling**: InfluxDB 3 error responses are now understood, so fields with a mismatched column type are converted instead of the data point being dropped
 
 ### v2025.0.0 (Modernization Release)
 **BREAKING CHANGES:**

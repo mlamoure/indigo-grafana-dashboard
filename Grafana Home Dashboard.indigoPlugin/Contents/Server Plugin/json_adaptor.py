@@ -6,13 +6,19 @@ import json
 import indigo
 from enum import Enum
 
+def to_bool(value):
+	"""Convert a string representation to a real boolean ('False' -> False)."""
+	return str(value).strip().lower() in ('true', 't', '1', 'yes', 'on')
+
 # Type converter mapping (replaces eval() for security)
 TYPE_CONVERTERS = {
 	'int': int,
 	'str': str,
 	'float': float,
 	'integer': int,  # InfluxDB sometimes returns "integer"
-	'string': str    # InfluxDB sometimes returns "string"
+	'string': str,   # InfluxDB sometimes returns "string"
+	'bool': to_bool,
+	'boolean': to_bool
 }
 
 # explicit changes
