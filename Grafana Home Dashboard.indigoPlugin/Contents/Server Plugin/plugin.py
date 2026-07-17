@@ -272,8 +272,10 @@ class Plugin(indigo.PluginBase):
 				# rejects this client's /query DDL calls (400 invalid mime
 				# type); retention is managed server-side. Skip both DDL calls,
 				# but ping so an unreachable server fails here rather than on
-				# the first write.
-				self.connection.ping()
+				# the first write. Can't use the client's ping(): it demands
+				# the 1.x 204 response, while InfluxDB 3 answers /ping with a
+				# 200 and a product-info JSON body.
+				self.connection.request(url="ping", method='GET', expected_response_code=200)
 				self.connection.switch_database(self.InfluxDB)
 			else:
 				self.connection.create_database(self.InfluxDB)
