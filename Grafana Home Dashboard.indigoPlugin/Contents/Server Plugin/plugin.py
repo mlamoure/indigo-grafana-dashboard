@@ -152,7 +152,7 @@ class Plugin(indigo.PluginBase):
 			self.InfluxDB = self.pluginPrefs.get('InfluxDB', 'indigo')
 			self.InfluxRetention = self.pluginPrefs.get('InfluxRetention', 6)
 			# InfluxDB version selection: "1" = InfluxDB 1.7/1.8 (default),
-			# "3" = InfluxDB 3 via its v1-compat API. Migrates the pre-2025.2.0
+			# "3" = InfluxDB 3 via its v1-compat API. Migrates the pre-2026.7.0
 			# InfluxV3Compat checkbox pref and persists the result so the
 			# config dialog shows the migrated selection.
 			self.InfluxVersion = str(self.pluginPrefs.get('InfluxVersion', ''))

@@ -91,7 +91,7 @@ Converts Indigo device objects to InfluxDB-compatible JSON format:
 ### InfluxDB Version
 **IMPORTANT**: This plugin supports InfluxDB **1.7/1.8** and **InfluxDB 3** (via its v1 compatibility API, selected with the "InfluxDB Version" dropdown in the connection config). It is **NOT compatible** with InfluxDB 2.x. In InfluxDB 3 mode the plugin skips database/retention DDL (servers are pre-provisioned and token-scoped) and drops fields that duplicate tag keys (IOx requires a column to be tag XOR field).
 
-### Write Pipeline (v2025.2.0+)
+### Write Pipeline (v2026.7.0+)
 Writes are asynchronous: producers (`deviceUpdated`, `variableUpdated`, `UpdateAll`) enqueue points with client-side timestamps; a single background writer thread batches them into one `write_points()` call per ~1s flush window (`influxWriterLoop` in plugin.py). This matters because InfluxDB 3 acknowledges each HTTP write only after its WAL flush (~1s default), so synchronous per-point writes cap at ~1 point/sec and back up Indigo's callback queue — which is what made the config dialog unresponsive. Never reintroduce network I/O into Indigo callback methods.
 
 ### Python Compatibility
@@ -220,7 +220,7 @@ The data filtering system (`filterValues` menu item) is complex:
 
 ## Version History
 
-### v2025.2.0 (InfluxDB 3 + Async Writer)
+### v2026.7.0 (InfluxDB 3 + Async Writer)
 - "InfluxDB Version" dropdown (1.7/1.8 vs 3) replaces the v2025.1.0 `InfluxV3Compat` checkbox; old pref is migrated and persisted automatically
 - Asynchronous batched write pipeline (background writer thread, client-side timestamps) — fixes the plugin-saturation/unresponsive-config-dialog issue against InfluxDB 3's ~1s WAL-flush write acks
 - Type-conflict recovery now parses InfluxDB 3 (IOx) error responses in addition to 1.x, so conflicting fields are coerced instead of the whole point being dropped
