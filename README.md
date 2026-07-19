@@ -127,7 +127,7 @@ AND time >= now() - 24h
 
 ## Version History
 
-### v2025.2.0 (InfluxDB 3 Support)
+### v2026.7.0 (InfluxDB 3 Support)
 - **InfluxDB Version dropdown**: choose InfluxDB 1.7/1.8 or InfluxDB 3 (v1 compatibility API) in the connection settings
 - **Asynchronous batched writes**: state changes are queued and written in batches on a background thread, so the plugin (and its config dialog) stays responsive even against servers with slow write acknowledgments
 - **Better type-conflict handling**: InfluxDB 3 error responses are now understood, so fields with a mismatched column type are converted instead of the data point being dropped
