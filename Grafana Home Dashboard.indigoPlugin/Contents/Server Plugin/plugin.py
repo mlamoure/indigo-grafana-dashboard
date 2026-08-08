@@ -609,7 +609,7 @@ class Plugin(indigo.PluginBase):
 				self.logger.debug("   device was excluded from InfluxDB update: " + newDev.name)
 			return
 
-		device_was_updated = self.DeviceToInflux(origDev, newDev, True)
+		device_was_updated, device_was_locked = self.DeviceToInflux(origDev, newDev, True)
 
 		if not device_was_updated:
 			if self.JSONDebug:
@@ -619,36 +619,46 @@ class Plugin(indigo.PluginBase):
 		if self.TransportDebug:
 			self.logger.debug("deviceUpdated(): an update for device " + origDev.name + " is being processed...")
 
+		# NOTE: keyed by device id.  UpdateAll() and the filter lock both key this
+		# list by dev.id; keying it by name here meant the unlock below never
+		# matched the row the filter had locked, so a locked device stayed locked
+		# for the life of the plugin and silently stopped reaching InfluxDB.
 		found = False
 		for devSearch in self.DeviceLastUpdatedList:
-			if devSearch[0] == origDev.name:
+			if devSearch[0] == newDev.id:
 				locked = devSearch[2]
 				found = True
 
 				devSearch[1] = datetime.datetime.now()
 
-				# unlock if locked since we rec'd an update
-				if locked:
+				# unlock if locked since we rec'd an update, unless a filter locked
+				# the device while processing this very update
+				if locked and not device_was_locked:
 					devSearch[2] = False
 
 				break
 
 		if not found:
-			self.DeviceLastUpdatedList.append([origDev.name, datetime.datetime.now(), False])
+			self.DeviceLastUpdatedList.append([newDev.id, datetime.datetime.now(), device_was_locked])
 
 		if self.TransportDebug:
 			self.logger.debug("completed deviceUpdated() for " + origDev.name)
 
 	def DeviceToInflux(self, origDev, dev, updateCheck = True):
+		"""Returns (somethingWasSent, deviceWasLocked).  The second element lets
+		deviceUpdated() tell 'this device was already locked' apart from 'a filter
+		locked it while processing this very update' - without it, the unlock
+		below would immediately undo the lock this call just took."""
 		# custom add to influx work
 		# tag by folder if present
 		tagnames = 'name folderId'.split()
+		deviceLocked = False
 
 		# if the device is excluded, do nothing
 		if dev.id in self.DeviceExcludeList:
 			if self.TransportDebug:
 				self.logger.debug("device was excluded from InfluxDB update: " + dev.name)
-			return False
+			return False, deviceLocked
 
 		if dev.id in self.DeviceIncludeList:
 			self.logger.debug("sending entire device to diff_to_json: " + dev.name)
@@ -657,7 +667,7 @@ class Plugin(indigo.PluginBase):
 			newjson = self.adaptor.diff_to_json(dev, self.StatesIncludeList, updateCheck)
 
 		if newjson is None:
-			return False
+			return False, deviceLocked
 
 		# Advanced data filtering processing section
 		if len(self.FilterList) > 0:
@@ -691,6 +701,8 @@ class Plugin(indigo.PluginBase):
 											if not found:  # if we couldn't find it in the DeviceLastUpdated list, we add it, and lock it.
 												self.DeviceLastUpdatedList.append([dev.id, datetime.datetime.now(), True])
 												found = True
+
+											deviceLocked = True
 
 											if found and self.TransportDebug:
 												self.logger.debug("    locked device " + dev.name + " from InfluxDB updates until a device change occurs.")
@@ -756,7 +768,7 @@ class Plugin(indigo.PluginBase):
 		del newjson['measurement']
 		self.SendToInflux(tags=newtags, what=newjson, measurement=measurement)
 
-		return True
+		return True, deviceLocked
 
 	def variableUpdated(self, origVar, newVar):
 		indigo.PluginBase.variableUpdated(self, origVar, newVar)
@@ -764,17 +776,19 @@ class Plugin(indigo.PluginBase):
 		if not self.connected:
 			return
 
-		## Log the timestamp for the variable update
+		## Log the timestamp for the variable update.  Keyed by variable id to match
+		## UpdateAll(); keying by name here meant every updated variable added a
+		## second, orphan row that UpdateAll() never read.
 		found = False
 		for varSearch in self.VariableLastUpdatedList:
-			if varSearch[0] == origVar.name:
+			if varSearch[0] == newVar.id:
 				found = True
 
 				varSearch[1] = datetime.datetime.now()
 				break
 
 		if not found:
-			self.VariableLastUpdatedList.append([origVar.name, datetime.datetime.now()])
+			self.VariableLastUpdatedList.append([newVar.id, datetime.datetime.now()])
 
 		self.VariableToInflux(newVar)
 
