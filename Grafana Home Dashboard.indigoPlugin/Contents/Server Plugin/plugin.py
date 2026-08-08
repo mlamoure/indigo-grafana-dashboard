@@ -12,7 +12,7 @@ import re
 import threading
 from dataclasses import dataclass
 from typing import Set
-from json_adaptor import JSONAdaptor
+from json_adaptor import JSONAdaptor, LIVENESS_FIELDS
 from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError
 
@@ -32,9 +32,40 @@ INFLUX_FLUSH_INTERVAL = 1.0  # seconds the writer coalesces points before flushi
 
 DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
 
+# States the JSON adaptor sends on every point regardless of the include list.  The
+# liveness fields must NOT be added to DEFAULT_STATES or the include list: anything
+# in that list sets hasUpdate, and lastChanged moves on every device change, so it
+# would emit a point per change per device.  They are offered for building filters
+# but hidden from the include-states picker so they can't be added by accident.
+ALWAYS_SENT_STATES = {'name', 'id'} | {key for pair in LIVENESS_FIELDS for key in pair}
+
 def to_bool(value):
 	"""Convert a string representation to a real boolean ('False' -> False)."""
 	return str(value).strip().lower() in ('true', 't', '1', 'yes', 'on')
+
+def numeric_value(value):
+	"""Coerce a value from the JSON adaptor to a float, or None when it is not
+	numeric.  Bools are deliberately rejected: a False -> True flip is a
+	divide-by-zero, not a percentage change."""
+	if isinstance(value, bool):
+		return None
+
+	try:
+		return float(value)
+	except (TypeError, ValueError):
+		return None
+
+def percent_changed(previousValue, newValue):
+	"""Percent change from previousValue to newValue, or None when it cannot be
+	computed - either side non-numeric, or a zero baseline.  Callers treat None
+	as 'no opinion' and let the value through."""
+	previous = numeric_value(previousValue)
+	current = numeric_value(newValue)
+
+	if previous is None or current is None or previous == 0:
+		return None
+
+	return ((current - previous) / previous) * 100.0
 
 # Type converter mapping (replaces eval() for security)
 TYPE_CONVERTERS = {
@@ -108,6 +139,15 @@ class Plugin(indigo.PluginBase):
 
 		self.VariableLastUpdatedList = []
 		self.DeviceLastUpdatedList = []
+
+		# Last value this plugin actually WROTE, per device, for the states some
+		# percentChanged filter watches.  UpdateAll() has no origDev to compare
+		# against, so this is its baseline.  Deliberately NOT the JSON adaptor's
+		# cache: that one is updated with the full device before the filters run,
+		# so it records values the filters then block - a blocked spike would
+		# become its own baseline and sail through on the next heartbeat.
+		self.DeviceLastWrittenValues = {}
+		self.PercentChangedStates = set()
 
 		self.FullStateList = []
 		self.AllStatesUI = []
@@ -205,6 +245,8 @@ class Plugin(indigo.PluginBase):
 			except (IndexError, KeyError, ValueError, TypeError) as e:
 				self.logger.error(f"there was an error loading/upgrading your filters: {e}. Please check the filters configuration to correct.")
 				self.logger.debug(f"Filter list data: {preferencesFilterList}")
+
+			self.RebuildFilterIndex()
 
 			# sets the default include states when the plugin has never been configured.
 			if len(self.StatesIncludeList) == 0:
@@ -609,7 +651,7 @@ class Plugin(indigo.PluginBase):
 				self.logger.debug("   device was excluded from InfluxDB update: " + newDev.name)
 			return
 
-		device_was_updated = self.DeviceToInflux(origDev, newDev, True)
+		device_was_updated, device_was_locked = self.DeviceToInflux(origDev, newDev, True)
 
 		if not device_was_updated:
 			if self.JSONDebug:
@@ -619,36 +661,93 @@ class Plugin(indigo.PluginBase):
 		if self.TransportDebug:
 			self.logger.debug("deviceUpdated(): an update for device " + origDev.name + " is being processed...")
 
+		# NOTE: keyed by device id.  UpdateAll() and the filter lock both key this
+		# list by dev.id; keying it by name here meant the unlock below never
+		# matched the row the filter had locked, so a locked device stayed locked
+		# for the life of the plugin and silently stopped reaching InfluxDB.
 		found = False
 		for devSearch in self.DeviceLastUpdatedList:
-			if devSearch[0] == origDev.name:
+			if devSearch[0] == newDev.id:
 				locked = devSearch[2]
 				found = True
 
 				devSearch[1] = datetime.datetime.now()
 
-				# unlock if locked since we rec'd an update
-				if locked:
+				# unlock if locked since we rec'd an update, unless a filter locked
+				# the device while processing this very update
+				if locked and not device_was_locked:
 					devSearch[2] = False
 
 				break
 
 		if not found:
-			self.DeviceLastUpdatedList.append([origDev.name, datetime.datetime.now(), False])
+			self.DeviceLastUpdatedList.append([newDev.id, datetime.datetime.now(), device_was_locked])
 
 		if self.TransportDebug:
 			self.logger.debug("completed deviceUpdated() for " + origDev.name)
 
+	def RebuildFilterIndex(self):
+		"""Index the states watched by at least one percentChanged filter.  Keeps
+		the last-written baseline map small, and drops stale baselines whenever the
+		filters change."""
+		self.PercentChangedStates = set()
+
+		for influxFilterRecord in self.FilterList:
+			if influxFilterRecord.filterStrategy == "percentChanged":
+				self.PercentChangedStates.add(influxFilterRecord.state)
+
+		self.DeviceLastWrittenValues = {}
+
+	def PreviousFilterValue(self, origDev, dev, key):
+		"""Baseline for a percentChanged comparison.  Prefers the pre-change state
+		Indigo handed us (deviceUpdated path), falling back to the last value this
+		plugin actually wrote (UpdateAll path, which has no origDev).  Returns None
+		when no baseline is known, meaning the value should be let through."""
+		if origDev is not None:
+			# 'key' is the adaptor's flattened key space ('state.onOffState',
+			# 'batteryLevel.num', ...).  Only the un-prefixed, un-suffixed form maps
+			# onto Indigo's own state namespace.
+			stateKey = key[6:] if key.startswith("state.") else key
+			if stateKey.endswith(".num"):
+				stateKey = stateKey[:-4]
+
+			if stateKey in origDev.states:
+				return origDev.states[stateKey]
+
+		return self.DeviceLastWrittenValues.get(dev.id, {}).get(key)
+
+	def LockDeviceUpdates(self, dev, state):
+		"""Lock a device out of the minimum-frequency heartbeat until Indigo reports
+		a change for it.  Locking is per-device, not per-state: a device emitting
+		garbage on one state is a sick device (see MenuItems.xml)."""
+		found = False
+		for devSearch in self.DeviceLastUpdatedList:
+			if devSearch[0] == dev.id:
+				devSearch[2] = True
+				found = True
+				break
+
+		if not found:  # if we couldn't find it in the DeviceLastUpdated list, we add it, and lock it.
+			self.DeviceLastUpdatedList.append([dev.id, datetime.datetime.now(), True])
+
+		if self.TransportDebug:
+			self.logger.debug("    locked device " + dev.name + " from InfluxDB updates (triggered by state/property '" + str(state) + "') until a device change occurs.")
+
 	def DeviceToInflux(self, origDev, dev, updateCheck = True):
+		"""Returns (somethingWasSent, deviceWasLocked).  The second element lets
+		deviceUpdated() tell 'this device was already locked' apart from 'a filter
+		locked it while processing this very update' - without it, the unlock
+		below would immediately undo the lock this call just took."""
 		# custom add to influx work
 		# tag by folder if present
 		tagnames = 'name folderId'.split()
+		deviceLocked = False
 
 		# if the device is excluded, do nothing
 		if dev.id in self.DeviceExcludeList:
 			if self.TransportDebug:
 				self.logger.debug("device was excluded from InfluxDB update: " + dev.name)
-			return False
+			return False, deviceLocked
 
 		if dev.id in self.DeviceIncludeList:
 			self.logger.debug("sending entire device to diff_to_json: " + dev.name)
@@ -657,7 +756,7 @@ class Plugin(indigo.PluginBase):
 			newjson = self.adaptor.diff_to_json(dev, self.StatesIncludeList, updateCheck)
 
 		if newjson is None:
-			return False
+			return False, deviceLocked
 
 		# Advanced data filtering processing section
 		if len(self.FilterList) > 0:
@@ -665,47 +764,36 @@ class Plugin(indigo.PluginBase):
 			for kk, vv in newjson.items():
 				for influxFilterRecord in self.FilterList:
 					passedFilter = True
+					origValue = None
+					percentValueChanged = None
 					try:
 						if (dev.id in influxFilterRecord.appliedDevices or influxFilterRecord.allDevices) and kk == influxFilterRecord.state:
-							self.logger.debug(dev.name + "[" + kk + "]: looking at filter (" + influxFilterRecord.name + "): " + influxFilterRecord.state + " for " + influxFilterRecord.appliesToString + " with a range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ")")
-							if influxFilterRecord.filterStrategy == "minMax" and (influxFilterRecord.minValue <= float(vv) <= influxFilterRecord.maxValue):
-								if self.TransportDebug:
-									self.logger.debug("    Filter passed (" + influxFilterRecord.name + "): a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device " + dev.name + "' was WITHIN the specified range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will be sent to InfluxDB")
-							elif origDev is not None and influxFilterRecord.filterStrategy == "percentChanged":
-								try:
-									origValue = origDev.states[kk]
-									percentValueChanged = ((origValue - vv) / origValue) * 100
+							if influxFilterRecord.filterStrategy == "percentChanged":
+								self.logger.debug(dev.name + "[" + kk + "]: looking at filter (" + influxFilterRecord.name + "): " + influxFilterRecord.state + " for " + influxFilterRecord.appliesToString + " with a maximum percent change of " + str(influxFilterRecord.maxPercent))
 
-									if abs(percentValueChanged) > influxFilterRecord.maxPercent:
-										passedFilter = False
+								origValue = self.PreviousFilterValue(origDev, dev, kk)
+								percentValueChanged = percent_changed(origValue, vv)
 
-										# if the lock minimum updates is true, we need to mark the device as locked
-										if influxFilterRecord.lockMinimumUpdates:
-											found = False
-											for devSearch in self.DeviceLastUpdatedList:
-												if devSearch[0] == dev.id:
-													devSearch[2] = True
-													found = True
-													break
+								if percentValueChanged is None:
+									self.logger.debug("    no usable previous value for state/property '" + str(kk) + "' on device '" + dev.name + "', unable to calculate percentage changed. Value will be sent on to InfluxDB.")
+								elif abs(percentValueChanged) > influxFilterRecord.maxPercent:
+									passedFilter = False
 
-											if not found:  # if we couldn't find it in the DeviceLastUpdated list, we add it, and lock it.
-												self.DeviceLastUpdatedList.append([dev.id, datetime.datetime.now(), True])
-												found = True
+									# if the lock minimum updates is true, we need to mark the device as locked
+									if influxFilterRecord.lockMinimumUpdates:
+										self.LockDeviceUpdates(dev, kk)
+										deviceLocked = True
+								else:
+									if self.TransportDebug:
+										self.logger.debug("    Filter passed (" + influxFilterRecord.name + "): a value (old value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' DID NOT exceeded percent changed (actual change: " + str(abs(percentValueChanged)) + ", threshhold: " + str(influxFilterRecord.maxPercent) + ") and will be sent to InfluxDB")
+							else:
+								self.logger.debug(dev.name + "[" + kk + "]: looking at filter (" + influxFilterRecord.name + "): " + influxFilterRecord.state + " for " + influxFilterRecord.appliesToString + " with a range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ")")
 
-											if found and self.TransportDebug:
-												self.logger.debug("    locked device " + dev.name + " from InfluxDB updates until a device change occurs.")
-
-									else:
-										if self.TransportDebug:
-											self.logger.debug("    Filter passed (" + influxFilterRecord.name + "): a value (old value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' DID NOT exceeded percent changed (actual change: " + str(abs(percentValueChanged)) + ", threshhold: " + str(influxFilterRecord.maxPercent) + ") and will be sent to InfluxDB")									
-
-								except Exception as e:
-									passedFilter = True
-									self.logger.debug("    error while trying to compute the percentage changed. Value will be sent on to InfluxDB.  Error: " + str(e))
-							elif origDev is None and influxFilterRecord.filterStrategy == "percentChanged":
-								self.logger.debug("    original device was not provided to compare, no ability to calcualte percentage changed")
-							else: #minMax comes here if the values were not within range
-								passedFilter = False
+								if influxFilterRecord.minValue <= float(vv) <= influxFilterRecord.maxValue:
+									if self.TransportDebug:
+										self.logger.debug("    Filter passed (" + influxFilterRecord.name + "): a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device " + dev.name + "' was WITHIN the specified range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will be sent to InfluxDB")
+								else:
+									passedFilter = False
 
 					except Exception as e:
 						passedFilter = True
@@ -722,6 +810,11 @@ class Plugin(indigo.PluginBase):
 							logLine = "Filter block (" + influxFilterRecord.name + "): a value (" + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' was not in the configured range (" + str(influxFilterRecord.minValue) + ", " + str(influxFilterRecord.maxValue) + ") and will not be sent to InfluxDB"
 						else:
 							logLine = "Filter block (" + influxFilterRecord.name + "): a value (previous value: " + str(origValue) + ", new value: " + str(vv) + ") for state/property '" + str(kk) + "' on device '" + dev.name + "' exceeded percent changed (percent changed: " + str(abs(percentValueChanged)) + "%, threshhold: " + str(influxFilterRecord.maxPercent) + "%) and will not be sent to InfluxDB"
+
+						# a lock silently stops ALL updates for the device, so make sure
+						# it lands in the filter log rather than only behind TransportDebug
+						if deviceLocked:
+							logLine = logLine + ".  The device has also been locked out of minimum-frequency updates until it reports a change."
 
 						try:
 							with open(self.FilterLogFileLoc, "a") as logFile:
@@ -744,6 +837,17 @@ class Plugin(indigo.PluginBase):
 
 		### END Advanced data filtering section
 
+		# Remember what actually reached InfluxDB, so UpdateAll() - which has no
+		# origDev - has a percentChanged baseline.  Recorded AFTER filtering, so a
+		# blocked value never becomes the baseline that lets its successor through.
+		if self.PercentChangedStates:
+			lastWritten = self.DeviceLastWrittenValues.setdefault(dev.id, {})
+			for stateKey in self.PercentChangedStates:
+				if stateKey in newjson:
+					numeric = numeric_value(newjson[stateKey])
+					if numeric is not None:
+						lastWritten[stateKey] = numeric
+
 		newtags = {}
 		for tag in tagnames:
 			newtags[tag] = str(getattr(dev, tag))
@@ -756,7 +860,7 @@ class Plugin(indigo.PluginBase):
 		del newjson['measurement']
 		self.SendToInflux(tags=newtags, what=newjson, measurement=measurement)
 
-		return True
+		return True, deviceLocked
 
 	def variableUpdated(self, origVar, newVar):
 		indigo.PluginBase.variableUpdated(self, origVar, newVar)
@@ -764,17 +868,19 @@ class Plugin(indigo.PluginBase):
 		if not self.connected:
 			return
 
-		## Log the timestamp for the variable update
+		## Log the timestamp for the variable update.  Keyed by variable id to match
+		## UpdateAll(); keying by name here meant every updated variable added a
+		## second, orphan row that UpdateAll() never read.
 		found = False
 		for varSearch in self.VariableLastUpdatedList:
-			if varSearch[0] == origVar.name:
+			if varSearch[0] == newVar.id:
 				found = True
 
 				varSearch[1] = datetime.datetime.now()
 				break
 
 		if not found:
-			self.VariableLastUpdatedList.append([origVar.name, datetime.datetime.now()])
+			self.VariableLastUpdatedList.append([newVar.id, datetime.datetime.now()])
 
 		self.VariableToInflux(newVar)
 
@@ -977,9 +1083,13 @@ class Plugin(indigo.PluginBase):
 
 		# BUILD UI LISTS  -- STATES
 		self.AvailableStatesUI = []
+		self.AllStatesUI = []
 
 		for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
-			if not ui[0] in self.StatesIncludeList and len(ui[0].strip()) > 0:
+			# always-sent states are hidden from the include picker (adding them there
+			# would multiply write volume) but kept in AllStatesUI, which feeds the
+			# filter property pickers
+			if not ui[0] in self.StatesIncludeList and len(ui[0].strip()) > 0 and ui[0] not in ALWAYS_SENT_STATES:
 				self.AvailableStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 			self.AllStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 
@@ -1156,10 +1266,12 @@ class Plugin(indigo.PluginBase):
 		else:
 			for kk, vv in sorted(newjson.items()):
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
-					if (kk in self.StatesIncludeList or included) and not excluded:
-						status = " (INCLUDED)"
-					elif excluded:
+					if excluded:
 						status = " (EXCLUDED)"
+					elif kk in ALWAYS_SENT_STATES:
+						status = " (ALWAYS SENT)"
+					elif kk in self.StatesIncludeList or included:
+						status = " (INCLUDED)"
 					else:
 						status = " (NOT INCLUDED)"
 
@@ -1184,10 +1296,12 @@ class Plugin(indigo.PluginBase):
 			for kk, vv in self.adaptor.to_json(dev).items():
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 					if kk == searchKey:
-						if kk in self.StatesIncludeList and not excluded:
-							status = " (INCLUDED)"
-						elif excluded:
+						if excluded:
 							status = " (EXCLUDED)"
+						elif kk in ALWAYS_SENT_STATES:
+							status = " (ALWAYS SENT)"
+						elif kk in self.StatesIncludeList:
+							status = " (INCLUDED)"
 						else:
 							status = " (NOT INCLUDED)"
 
@@ -1345,6 +1459,8 @@ class Plugin(indigo.PluginBase):
 
 		self.pluginPrefs["listFilterList"] = toSave
 		self.pluginPrefs["preferencesFilterVersion"] = "2.0.0"
+
+		self.RebuildFilterIndex()
 
 	def SaveFilterValues(self, valuesDict, typeId=0, devId=0):
 		if valuesDict["filterProperty"] is None:

@@ -21,6 +21,20 @@ TYPE_CONVERTERS = {
 	'boolean': to_bool
 }
 
+# Device liveness markers, emitted on every device point by diff_to_json() so that
+# a flat line from a DEAD device is distinguishable from a flat line from a merely
+# QUIET one.  Each pair is (indigo attribute, derived age field): the absolute
+# timestamp is the backfill-correct record, the age is what you can actually alert
+# on, since InfluxQL has no way to express now() - field in a SELECT projection.
+LIVENESS_FIELDS = (
+	('lastChanged', 'secondsSinceLastChanged'),
+	('lastSuccessfulComm', 'secondsSinceLastSuccessfulComm')
+)
+
+# Indigo reports a 1970-ish placeholder for devices that have never communicated.
+# Anything older than 2000-01-01 UTC is that placeholder, not an observation.
+LIVENESS_SENTINEL_FLOOR = 946684800.0
+
 # explicit changes
 def indigo_json_serial(obj):
 	"""JSON serializer for objects not serializable by default json code"""
@@ -238,6 +252,31 @@ class JSONAdaptor():
 		diffjson['name'] = device.name
 		diffjson['id'] = float(device.id)
 		diffjson['measurement'] = newjson['measurement']
+
+		# Device liveness.  Emitted HERE, after the `not hasUpdate` return above, so
+		# these enrich points that were already going to be written rather than
+		# creating new ones: lastChanged moves constantly and, if it reached the
+		# include-gate above, would defeat the dedup and multiply write volume.
+		# For the same reason these must never be added to the include-states list.
+		now = time_.time()
+		for key, agekey in LIVENESS_FIELDS:
+			raw = newjson.get(key)
+			try:
+				ts = float(raw)
+			except (TypeError, ValueError):
+				# attribute absent (not every device class communicates), or coerced
+				# to something non-numeric by the typecache
+				continue
+
+			if ts < LIVENESS_SENTINEL_FLOOR:
+				# never-communicated placeholder: omit rather than write 0, so that
+				# "not applicable" stays distinct from "stale" in Grafana
+				continue
+
+			# write the value to_json() produced, not the float, so a typecache
+			# correction already applied to this column is not undone here
+			diffjson[key] = raw
+			diffjson[agekey] = max(0.0, round(now - ts, 3))
 
 		if self.JSONDebug:
 			self.logger.debug(json.dumps(newjson, default=indigo_json_serial).encode('utf-8'))
