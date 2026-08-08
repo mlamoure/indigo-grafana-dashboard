@@ -45,7 +45,8 @@ The main plugin class extends `indigo.PluginBase` and manages:
 **Key State Variables**:
 - `connection`: InfluxDBClient instance
 - `connected`: Boolean connection status
-- `DeviceLastUpdatedList` / `VariableLastUpdatedList`: Track update times for minimum frequency updates
+- `DeviceLastUpdatedList` / `VariableLastUpdatedList`: Track update times for minimum frequency updates. **Keyed by `dev.id` / `var.id` — never by name.** Element 2 of a device row is the `lockMinimumUpdates` lock. In-memory only; cleared on restart.
+- `DeviceLastWrittenValues` / `PercentChangedStates`: Baseline for `percentChanged` filters on the polling path (which has no `origDev`). Populated **after** filtering, so a blocked value never becomes the baseline that lets its successor through. Deliberately *not* the adaptor's cache — see below.
 - `FilterList`: Array of `InfluxFilter` objects for data validation
 
 ### json_adaptor.py
@@ -53,7 +54,8 @@ Converts Indigo device objects to InfluxDB-compatible JSON format:
 - Smart type conversion (strings → floats where possible)
 - Datetime → Unix timestamps
 - Enum → string conversion
-- Caching to reduce redundant writes
+- Caching to reduce redundant writes. **This cache is "last seen", not "last written"** — it is updated with the full device *before* `DeviceToInflux`'s filter loop runs, so it records values the filters then block. Never use it as a filter baseline.
+- Device liveness fields (`lastChanged`, `lastSuccessfulComm`, `secondsSince*`), emitted on every device point
 
 **Author**: Dave Brown (Copyright 2017, 2018)
 
@@ -93,6 +95,13 @@ Converts Indigo device objects to InfluxDB-compatible JSON format:
 
 ### Write Pipeline (v2026.7.0+)
 Writes are asynchronous: producers (`deviceUpdated`, `variableUpdated`, `UpdateAll`) enqueue points with client-side timestamps; a single background writer thread batches them into one `write_points()` call per ~1s flush window (`influxWriterLoop` in plugin.py). This matters because InfluxDB 3 acknowledges each HTTP write only after its WAL flush (~1s default), so synchronous per-point writes cap at ~1 point/sec and back up Indigo's callback queue — which is what made the config dialog unresponsive. Never reintroduce network I/O into Indigo callback methods.
+
+### Device Liveness Fields (v2026.8.0+)
+`diff_to_json` emits `lastChanged`, `lastSuccessfulComm` and derived `secondsSinceLastChanged` / `secondsSinceLastSuccessfulComm` on **every** device point, so a flat line from a *dead* device is distinguishable from a flat line from a merely *quiet* one.
+
+These are **enrichment-only and must never reach the include-states gate.** They are added after the `if not hasUpdate: return None` early-return, so they ride along on points that were already going to be written and add zero new points. Anything in `StatesIncludeList` sets `hasUpdate`, and `lastChanged` moves on every device change — routing them through the include list would emit a point per change per device. For that reason they are deliberately absent from `DEFAULT_STATES` and hidden from the include-states picker (`ALWAYS_SENT_STATES` in plugin.py), though still offered in the filter property picker.
+
+The age fields exist because InfluxQL cannot express `now() - field` in a `SELECT` projection and Grafana's Math expressions have no wall-clock function, so a staleness alert cannot be built from the absolute epochs alone. Note that `lastChanged` alone does not discriminate — a quiet-but-alive device and a dead one both have a frozen `lastChanged`; alert on `secondsSinceLastSuccessfulComm`.
 
 ### Python Compatibility
 - Requires Python 3.11+ (Indigo 2025.1)
@@ -219,6 +228,16 @@ The data filtering system (`filterValues` menu item) is complex:
 3. **All other devices**: Only global include states sent
 
 ## Version History
+
+### v2026.8.0 (Filter Lock Fixes + Device Liveness)
+- **Fixed**: `DeviceLastUpdatedList` / `VariableLastUpdatedList` were keyed by id in `UpdateAll()` and by name in `deviceUpdated()` / `variableUpdated()`. The unlock was dead code, so a device locked by a `percentChanged` filter would have stayed locked for the life of the plugin process and silently stopped reaching InfluxDB. Latent — no `percentChanged` filter had ever blocked a value
+- **Fixed**: `deviceUpdated()` would have immediately undone a lock the same update had just taken; `DeviceToInflux()` now returns `(somethingWasSent, deviceWasLocked)`
+- **Fixed**: `percentChanged` filters could not evaluate on the `UpdateAll()` polling path (no `origDev`), so a spike blocked on the event path leaked into InfluxDB on the next heartbeat. Polling now falls back to `DeviceLastWrittenValues`
+- **Fixed**: `percentChanged` filters on `state.*` / `*.num` keys raised `KeyError` and were silently passed; zero baselines raised `ZeroDivisionError` and were silently passed
+- **Fixed**: `BuildConfigurationLists()` never reset `AllStatesUI`, so the filter property dropdown gained a duplicate copy of every state name every 15 minutes
+- **Added**: device liveness fields on every point (see Device Liveness Fields above)
+- **Added**: locks are now recorded in `filter.log`, not only behind `TransportDebug`
+- Filter evaluation log line no longer prints `with a range (0.0, 0.0)` for `percentChanged` filters
 
 ### v2026.7.0 (InfluxDB 3 + Async Writer)
 - "InfluxDB Version" dropdown (1.7/1.8 vs 3) replaces the v2025.1.0 `InfluxV3Compat` checkbox; old pref is migrated and persisted automatically

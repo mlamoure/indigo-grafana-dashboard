@@ -118,7 +118,42 @@ AND time >= now() - 24h
 ### Device Changes
 - **Measurement**: `device_changes`
 - **Tags**: `name`, `folderId`, `folder` (if in a folder)
-- **Fields**: All device states (based on inclusion criteria)
+- **Fields**: All device states (based on inclusion criteria), plus the device liveness fields below
+
+### Device Liveness Fields
+
+Every device point also carries, automatically and regardless of your inclusion criteria:
+
+| Field | Meaning |
+|---|---|
+| `lastSuccessfulComm` | Unix timestamp of the device's last successful communication |
+| `secondsSinceLastSuccessfulComm` | How long ago that was, in seconds |
+| `lastChanged` | Unix timestamp of the device's last state change |
+| `secondsSinceLastChanged` | How long ago that was, in seconds |
+
+These let you tell a **dead** device from a merely **quiet** one. Without them, a sensor that
+stopped reporting months ago looks identical in Grafana to a thermostat holding steady overnight —
+both are a flat line, because the plugin keeps re-sending the last known value as a heartbeat so
+your graphs don't gap.
+
+Alert on `secondsSinceLastSuccessfulComm`, not `lastChanged` — a quiet-but-healthy device also has
+a frozen `lastChanged`. A useful "dead sensor" panel:
+
+```sql
+SELECT last("secondsSinceLastSuccessfulComm") FROM "device_changes"
+WHERE $timeFilter GROUP BY "name"
+```
+
+Sort descending and set the unit to seconds. Anything much larger than a few times your
+**Minimum Update Frequency** is worth investigating.
+
+> ⚠️ **Do not add `lastChanged` or `lastSuccessfulComm` to your include-states list.** They are
+> already sent on every point. Adding them to the include list makes every change to them generate
+> its own data point, which can multiply your write volume dramatically. For this reason they are
+> hidden from the include-states picker.
+
+Devices that have never communicated (virtual devices, device groups, some plugin-backed devices)
+simply omit these fields rather than reporting as maximally stale.
 
 ### Variable Changes
 - **Measurement**: `variable_changes`
@@ -126,6 +161,14 @@ AND time >= now() - 24h
 - **Fields**: `name`, `value`, `value.num` (if numeric)
 
 ## Version History
+
+### v2026.8.0 (Filter Fixes + Device Liveness)
+- **New**: device liveness fields on every point — tell a dead sensor from a quiet one (see [Device Liveness Fields](#device-liveness-fields))
+- **Fixed**: "percent changed" filters were ignored during the periodic minimum-frequency update, so a bad value the filter had blocked could still reach InfluxDB on the next heartbeat
+- **Fixed**: the "lock minimum frequency updates after filter failure" option could leave a device locked permanently, silently stopping all of its data
+- **Fixed**: "percent changed" filters on states written as `state.<name>` or `<name>.num`, and filters where the previous value was zero, silently passed everything through
+- **Fixed**: filter blocks that lock a device now say so in the filter log
+- **Fixed**: the filter property dropdown accumulated duplicate entries over time
 
 ### v2026.7.0 (InfluxDB 3 Support)
 - **InfluxDB Version dropdown**: choose InfluxDB 1.7/1.8 or InfluxDB 3 (v1 compatibility API) in the connection settings
