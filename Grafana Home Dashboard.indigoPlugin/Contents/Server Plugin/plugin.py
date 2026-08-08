@@ -703,7 +703,7 @@ class Plugin(indigo.PluginBase):
 									passedFilter = True
 									self.logger.debug("    error while trying to compute the percentage changed. Value will be sent on to InfluxDB.  Error: " + str(e))
 							elif origDev is None and influxFilterRecord.filterStrategy == "percentChanged":
-								self.logger.debug("    original device was not provided to compare, no ability to calcualte percentage changed")
+								self.logger.debug("    original device was not provided to compare, no ability to calculate percentage changed")
 							else: #minMax comes here if the values were not within range
 								passedFilter = False
 
