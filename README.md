@@ -131,13 +131,13 @@ Every device point also carries, automatically and regardless of your inclusion 
 | `lastChanged` | Unix timestamp of the device's last state change |
 | `secondsSinceLastChanged` | How long ago that was, in seconds |
 
-These let you tell a **dead** device from a merely **quiet** one. Without them, a sensor that
-stopped reporting months ago looks identical in Grafana to a thermostat holding steady overnight —
-both are a flat line, because the plugin keeps re-sending the last known value as a heartbeat so
-your graphs don't gap.
+These let you tell a device that has **stopped communicating** from one that is merely **quiet**.
+Without them, a device that dropped off the network months ago looks identical in Grafana to a
+thermostat holding steady overnight — both are a flat line, because the plugin keeps re-sending the
+last known value as a heartbeat so your graphs don't gap.
 
 Alert on `secondsSinceLastSuccessfulComm`, not `lastChanged` — a quiet-but-healthy device also has
-a frozen `lastChanged`. A useful "dead sensor" panel:
+a frozen `lastChanged`. A useful "offline device" panel:
 
 ```sql
 SELECT last("secondsSinceLastSuccessfulComm") FROM "device_changes"
@@ -146,6 +146,24 @@ WHERE $timeFilter GROUP BY "name"
 
 Sort descending and set the unit to seconds. Anything much larger than a few times your
 **Minimum Update Frequency** is worth investigating.
+
+#### What these fields do *not* catch
+
+A device can keep communicating normally while one of its readings is stuck — a sensor that still
+answers polls but always reports the same temperature, for example. Indigo considers such a device
+healthy, so both timestamps stay current and the liveness fields will not flag it.
+
+That failure mode is a *value* problem, not a *communication* problem, and it is best detected in
+Grafana by asking whether a reading has moved at all over a long window:
+
+```sql
+SELECT spread("sensorValue") FROM "device_changes"
+WHERE time > now() - 24h GROUP BY "name"
+```
+
+A spread of exactly `0` over 24 hours, for a reading that ought to vary, means the value is stuck
+even though the device looks alive. Use the liveness fields for "is it there?" and a spread/stddev
+check for "is it still telling me anything?".
 
 > ⚠️ **Do not add `lastChanged` or `lastSuccessfulComm` to your include-states list.** They are
 > already sent on every point. Adding them to the include list makes every change to them generate
