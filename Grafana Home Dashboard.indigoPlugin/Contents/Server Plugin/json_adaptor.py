@@ -31,9 +31,17 @@ LIVENESS_FIELDS = (
 	('lastSuccessfulComm', 'secondsSinceLastSuccessfulComm')
 )
 
-# Indigo reports a 1970-ish placeholder for devices that have never communicated.
-# Anything older than 2000-01-01 UTC is that placeholder, not an observation.
-LIVENESS_SENTINEL_FLOOR = 946684800.0
+# Indigo reports a placeholder timestamp of 2000-01-01 LOCAL time for devices that
+# have never communicated (virtual devices, device groups, some plugin-backed
+# devices).  smart_value() converts via .timestamp(), so the epoch depends on the
+# server's UTC offset - 946702800 on a US Eastern server, up to 946728000 at UTC-12.
+# The floor is therefore 2000-01-02T00:00Z, which covers the placeholder in every
+# timezone while staying far below any real observation.
+#
+# Do not lower this to 2000-01-01T00:00Z: on any server west of UTC the placeholder
+# then sorts ABOVE the floor and those devices report as ~26 years stale, pinning
+# the top of every staleness panel - the exact outcome this floor exists to prevent.
+LIVENESS_SENTINEL_FLOOR = 946771200.0
 
 # explicit changes
 def indigo_json_serial(obj):

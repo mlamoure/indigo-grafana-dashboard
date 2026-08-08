@@ -186,15 +186,25 @@ class TestLivenessConstants:
             ('lastSuccessfulComm', 'secondsSinceLastSuccessfulComm'),
         )
 
-    def test_sentinel_floor_is_year_2000(self):
-        """Indigo reports a 1970-ish placeholder for devices that never
-        communicated; those must be omitted, not written as a maximally stale 0."""
-        import datetime
-        floor = datetime.datetime.fromtimestamp(LIVENESS_SENTINEL_FLOOR,
-                                                datetime.timezone.utc)
-        assert floor.year == 2000
-        assert 0.0 < LIVENESS_SENTINEL_FLOOR
-        assert LIVENESS_SENTINEL_FLOOR < 1000000000.0  # comfortably below "now"
+    def test_sentinel_floor_covers_the_placeholder_in_every_timezone(self):
+        """Indigo's never-communicated placeholder is 2000-01-01 LOCAL time, so its
+        epoch depends on the server's UTC offset. Observed as 946702800 on this US
+        Eastern server. The floor must sit above the latest possible rendering
+        (UTC-12) or those devices report as ~26 years stale and pin the top of every
+        staleness panel."""
+        placeholder_utc = 946684800.0  # 2000-01-01T00:00:00Z
+        latest_local = placeholder_utc + 12 * 3600  # same wall-clock at UTC-12
+        observed_us_eastern = 946702800.0
+
+        assert LIVENESS_SENTINEL_FLOOR > latest_local
+        assert LIVENESS_SENTINEL_FLOOR > observed_us_eastern
+        assert LIVENESS_SENTINEL_FLOOR > placeholder_utc
+
+    def test_sentinel_floor_stays_below_any_real_observation(self):
+        """A floor set too high would silently drop genuinely old-but-real
+        timestamps. 2001 onwards must survive."""
+        year_2001 = 978307200.0
+        assert LIVENESS_SENTINEL_FLOOR < year_2001
 
     def test_liveness_fields_are_always_sent(self):
         """They must never be routed through the include-states gate: lastChanged

@@ -101,7 +101,11 @@ Writes are asynchronous: producers (`deviceUpdated`, `variableUpdated`, `UpdateA
 
 These are **enrichment-only and must never reach the include-states gate.** They are added after the `if not hasUpdate: return None` early-return, so they ride along on points that were already going to be written and add zero new points. Anything in `StatesIncludeList` sets `hasUpdate`, and `lastChanged` moves on every device change — routing them through the include list would emit a point per change per device. For that reason they are deliberately absent from `DEFAULT_STATES` and hidden from the include-states picker (`ALWAYS_SENT_STATES` in plugin.py), though still offered in the filter property picker.
 
-The age fields exist because InfluxQL cannot express `now() - field` in a `SELECT` projection and Grafana's Math expressions have no wall-clock function, so a staleness alert cannot be built from the absolute epochs alone. Note that `lastChanged` alone does not discriminate — a quiet-but-alive device and a dead one both have a frozen `lastChanged`; alert on `secondsSinceLastSuccessfulComm`.
+The age fields exist because InfluxQL cannot express `now() - field` in a `SELECT` projection and Grafana's Math expressions have no wall-clock function, so a staleness alert cannot be built from the absolute epochs alone. Note that `lastChanged` alone does not discriminate — a quiet-but-alive device and an offline one both have a frozen `lastChanged`; alert on `secondsSinceLastSuccessfulComm`.
+
+**Scope limit — these detect a device that stopped *communicating*, not one whose *value* is stuck.** Verified on production 2026-08-08: `Living Room Temperature` (the device in issue #7) has had `sensorValue` frozen at exactly 69.1 for 7 days, yet Indigo reports both `lastSuccessfulComm` and `lastChanged` as minutes old — the Z-Wave node still answers, it just never reports a different reading. A healthy sensor polled less recently can therefore look *staler* than this one. Detecting a stuck value is a dashboard-side query (`SELECT spread("sensorValue") ... GROUP BY "name"`, where exactly `0` over 24h means stuck), not something the plugin can flag.
+
+`LIVENESS_SENTINEL_FLOOR` is `2000-01-02T00:00Z`, not `2000-01-01T00:00Z`. Indigo's never-communicated placeholder is 2000-01-01 in **local** time, so on any server west of UTC it lands above a UTC-midnight floor and those devices report as ~26 years stale.
 
 ### Python Compatibility
 - Requires Python 3.11+ (Indigo 2025.1)
@@ -235,7 +239,7 @@ The data filtering system (`filterValues` menu item) is complex:
 - **Fixed**: `percentChanged` filters could not evaluate on the `UpdateAll()` polling path (no `origDev`), so a spike blocked on the event path leaked into InfluxDB on the next heartbeat. Polling now falls back to `DeviceLastWrittenValues`
 - **Fixed**: `percentChanged` filters on `state.*` / `*.num` keys raised `KeyError` and were silently passed; zero baselines raised `ZeroDivisionError` and were silently passed
 - **Fixed**: `BuildConfigurationLists()` never reset `AllStatesUI`, so the filter property dropdown gained a duplicate copy of every state name every 15 minutes
-- **Added**: device liveness fields on every point (see Device Liveness Fields above)
+- **Added**: device liveness fields on every point (see Device Liveness Fields above). Verified on production: coverage 6 → 874 of 977 devices, point rate unchanged (~6,000/hr before and after). The ~100 uncovered devices have no key intersecting the include-states list, so no point is written for them at all — a pre-existing gap, not a regression
 - **Added**: locks are now recorded in `filter.log`, not only behind `TransportDebug`
 - Filter evaluation log line no longer prints `with a range (0.0, 0.0)` for `percentChanged` filters
 
