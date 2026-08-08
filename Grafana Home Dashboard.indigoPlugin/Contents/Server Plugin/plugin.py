@@ -12,7 +12,7 @@ import re
 import threading
 from dataclasses import dataclass
 from typing import Set
-from json_adaptor import JSONAdaptor
+from json_adaptor import JSONAdaptor, LIVENESS_FIELDS
 from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError
 
@@ -31,6 +31,13 @@ INFLUX_QUEUE_MAX = 10000  # bounded pending-write queue; new points are dropped 
 INFLUX_FLUSH_INTERVAL = 1.0  # seconds the writer coalesces points before flushing a batch
 
 DEFAULT_STATES = ["state.onOffState", "onState", "onState.num", "model", "subModel", "deviceTypeId", "state.hvac_state", "energyCurLevel", "energyAccumTotal", "value.num", "sensorValue", "coolSetpoint", "heatSetpoint", "batteryLevel", "batteryLevel.num"]
+
+# States the JSON adaptor sends on every point regardless of the include list.  The
+# liveness fields must NOT be added to DEFAULT_STATES or the include list: anything
+# in that list sets hasUpdate, and lastChanged moves on every device change, so it
+# would emit a point per change per device.  They are offered for building filters
+# but hidden from the include-states picker so they can't be added by accident.
+ALWAYS_SENT_STATES = {'name', 'id'} | {key for pair in LIVENESS_FIELDS for key in pair}
 
 def to_bool(value):
 	"""Convert a string representation to a real boolean ('False' -> False)."""
@@ -1076,9 +1083,13 @@ class Plugin(indigo.PluginBase):
 
 		# BUILD UI LISTS  -- STATES
 		self.AvailableStatesUI = []
+		self.AllStatesUI = []
 
 		for ui in sorted(self.FullStateList, key=lambda tup: tup[0]):
-			if not ui[0] in self.StatesIncludeList and len(ui[0].strip()) > 0:
+			# always-sent states are hidden from the include picker (adding them there
+			# would multiply write volume) but kept in AllStatesUI, which feeds the
+			# filter property pickers
+			if not ui[0] in self.StatesIncludeList and len(ui[0].strip()) > 0 and ui[0] not in ALWAYS_SENT_STATES:
 				self.AvailableStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 			self.AllStatesUI.append((ui[0], ui[0] + " (" + str(ui[1]) + ")"))
 
@@ -1255,10 +1266,12 @@ class Plugin(indigo.PluginBase):
 		else:
 			for kk, vv in sorted(newjson.items()):
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
-					if (kk in self.StatesIncludeList or included) and not excluded:
-						status = " (INCLUDED)"
-					elif excluded:
+					if excluded:
 						status = " (EXCLUDED)"
+					elif kk in ALWAYS_SENT_STATES:
+						status = " (ALWAYS SENT)"
+					elif kk in self.StatesIncludeList or included:
+						status = " (INCLUDED)"
 					else:
 						status = " (NOT INCLUDED)"
 
@@ -1283,10 +1296,12 @@ class Plugin(indigo.PluginBase):
 			for kk, vv in self.adaptor.to_json(dev).items():
 				if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 					if kk == searchKey:
-						if kk in self.StatesIncludeList and not excluded:
-							status = " (INCLUDED)"
-						elif excluded:
+						if excluded:
 							status = " (EXCLUDED)"
+						elif kk in ALWAYS_SENT_STATES:
+							status = " (ALWAYS SENT)"
+						elif kk in self.StatesIncludeList:
+							status = " (INCLUDED)"
 						else:
 							status = " (NOT INCLUDED)"
 
