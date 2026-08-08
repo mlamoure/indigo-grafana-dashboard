@@ -162,8 +162,22 @@ WHERE time > now() - 24h GROUP BY "name"
 ```
 
 A spread of exactly `0` over 24 hours, for a reading that ought to vary, means the value is stuck
-even though the device looks alive. Use the liveness fields for "is it there?" and a spread/stddev
-check for "is it still telling me anything?".
+even though the device looks alive. Use the liveness fields for "is it there?" and a spread check
+for "is it still telling me anything?".
+
+Two things to get right before alerting on this, or it will cry wolf and be ignored:
+
+- **Compare each device against its own history, not against zero.** A flat reading is only
+  suspicious if that device has varied before. Plenty of readings are legitimately constant — a
+  closet luminance sensor that always reads 0, a setpoint, a battery level, a relay. Flag a device
+  only when `spread` over 24h is 0 *and* its spread over the previous 30 days was greater than 0.
+- **It misses a value stuck with dither.** A sensor alternating 69.1 / 69.2 has a spread of 0.1,
+  not 0, so a comparison against zero will not catch it. Comparing today's spread against the
+  device's own historical spread does.
+
+Scope it to readings that physically vary — `sensorValue` on sensors, for example. Across 31
+temperature sensors over 24 hours on the author's system, exactly one was flat while every other
+swung 1.2–21.7 °F, so the separation is clean where the check applies.
 
 > ⚠️ **Do not add `lastChanged` or `lastSuccessfulComm` to your include-states list.** They are
 > already sent on every point. Adding them to the include list makes every change to them generate
@@ -185,7 +199,7 @@ simply omit these fields rather than reporting as maximally stale.
 - **Fixed**: "percent changed" filters were ignored during the periodic minimum-frequency update, so a bad value the filter had blocked could still reach InfluxDB on the next heartbeat
 - **Fixed**: the "lock minimum frequency updates after filter failure" option could leave a device locked permanently, silently stopping all of its data
 - **Fixed**: "percent changed" filters on states written as `state.<name>` or `<name>.num`, and filters where the previous value was zero, silently passed everything through
-- **Fixed**: filter blocks that lock a device now say so in the filter log
+- **Fixed**: filter blocks that lock a device now say so in the filter log, and a locked device announces itself in the Indigo event log instead of only under debug logging — a locked device sends nothing at all for any of its states, which otherwise looks exactly like a device that is simply quiet
 - **Fixed**: the filter property dropdown accumulated duplicate entries over time
 
 ### v2026.7.0 (InfluxDB 3 Support)

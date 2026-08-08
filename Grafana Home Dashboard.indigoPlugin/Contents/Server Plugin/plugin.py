@@ -589,8 +589,10 @@ class Plugin(indigo.PluginBase):
 						needsUpdating = True
 						devSearch[1] = datetime.datetime.now()
 					elif locked:
-						if self.TransportDebug:
-							self.logger.debug("    device " + dev.name + " was locked from being updated as it failed a device filter.")						
+						# logged at info, NOT behind TransportDebug: a locked device sends
+						# nothing at all for any of its states, which is indistinguishable
+						# from a healthy quiet device unless something says so out loud.
+						self.logger.info("device " + dev.name + " is locked from being updated as it failed a device filter; no data is being recorded for it until it reports a change.")
 
 					break  # STOP THE search through the update list
 

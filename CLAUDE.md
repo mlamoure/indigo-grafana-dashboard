@@ -240,7 +240,7 @@ The data filtering system (`filterValues` menu item) is complex:
 - **Fixed**: `percentChanged` filters on `state.*` / `*.num` keys raised `KeyError` and were silently passed; zero baselines raised `ZeroDivisionError` and were silently passed
 - **Fixed**: `BuildConfigurationLists()` never reset `AllStatesUI`, so the filter property dropdown gained a duplicate copy of every state name every 15 minutes
 - **Added**: device liveness fields on every point (see Device Liveness Fields above). Verified on production: coverage 6 → 874 of 977 devices, point rate unchanged (~6,000/hr before and after). The ~100 uncovered devices have no key intersecting the include-states list, so no point is written for them at all — a pre-existing gap, not a regression
-- **Added**: locks are now recorded in `filter.log`, not only behind `TransportDebug`
+- **Added**: locks are now recorded in `filter.log`, and `UpdateAll` logs a locked device at `info` rather than behind `TransportDebug`. A locked device emits nothing for any of its states, which is indistinguishable from a healthy quiet device unless something says so out loud — deliberately a one-line visibility change rather than a watchdog, since the lock has never fired in this plugin's history
 - Filter evaluation log line no longer prints `with a range (0.0, 0.0)` for `percentChanged` filters
 
 ### v2026.7.0 (InfluxDB 3 + Async Writer)
