@@ -7,7 +7,7 @@ An Indigo plugin that logs device and variable states to InfluxDB for visualizat
 
 ## Features
 
-* **InfluxDB Client**: Connects to your external InfluxDB 1.7/1.8 server, or InfluxDB 3 via its v1 compatibility API
+* **InfluxDB Client**: Connects to your external InfluxDB 1.7/1.8 server, or InfluxDB 3 via its v1 compatibility API. Nothing to install: the plugin uses the Python packages that come with Indigo
 * **Granular Control**: Advanced inclusion/exclusion criteria to control which devices and states are logged
 * **Data Filtering**: Prevent erroneous values from being logged with min/max ranges and percentage change thresholds
 * **Smart Updates**: Configurable minimum update frequency to avoid gaps in graphs
@@ -18,6 +18,7 @@ An Indigo plugin that logs device and variable states to InfluxDB for visualizat
 ### Indigo Requirements
 * Indigo 2025.1 or higher
 * macOS with Python 3.11+
+* No extra Python packages. Since 2026.11.0 the plugin talks to InfluxDB through `requests`, which Indigo installs itself, so Indigo installs nothing for it (no `Contents/Packages` folder)
 
 ### External Server Requirements
 * **InfluxDB 1.7 or 1.8** (NOT compatible with 2.x)
@@ -26,7 +27,7 @@ An Indigo plugin that logs device and variable states to InfluxDB for visualizat
   - Download: https://portal.influxdata.com/downloads/
 * **or InfluxDB 3** (Core/Enterprise) reached through its v1 compatibility API
   - Select "InfluxDB 3" in the plugin's InfluxDB Version dropdown
-  - The database must already exist and the credentials/token must have write access — the plugin does not create databases or retention policies on InfluxDB 3 (retention is managed server-side)
+  - The credentials/token must have write access to the database — the plugin does not create databases or retention policies on InfluxDB 3 (retention is managed server-side; InfluxDB 3 creates a missing database on the first write when the token allows it)
   - For token auth, leave the username as configured on your server and supply the token as the password (v1-compat convention)
 * **Grafana** (for visualization, optional but recommended)
   - Docker: `docker run -p 3000:3000 grafana/grafana`
@@ -51,8 +52,22 @@ Configure the connection to your InfluxDB server in the plugin configuration:
 * **InfluxDB HTTP Port**: HTTP API port (default: 8086)
 * **InfluxDB User**: Username for authentication
 * **InfluxDB Password**: Password for authentication
-* **InfluxDB Database**: Database name (created if it doesn't exist on InfluxDB 1.x; must already exist on InfluxDB 3)
-* **Retention Policy**: How long to keep data (6 months, 1 year, 2 years, 5 years, or forever) — applied on InfluxDB 1.x only; InfluxDB 3 retention is managed server-side
+* **InfluxDB Database**: Database name (created on InfluxDB 1.x when the user has admin rights; a user without them can log to a database created for it)
+* **Retention Policy**: How long to keep data (6 months, 1 year, 2 years, 5 years, or forever) — InfluxDB 1.x only; InfluxDB 3 retention is managed server-side. See [Retention on InfluxDB 1.x](#retention-on-influxdb-1x)
+
+The dialog checks these settings before it closes (host, a port from 1 to 65535, the version, the database), and a connection change is applied in the background, so saving never freezes the plugin.
+
+#### Retention on InfluxDB 1.x
+
+The plugin applies the retention setting through a retention policy named `indigo_policy`, which it makes the database's **default** policy so that data is written there.
+
+Plugin versions before 2026.11.0 created `indigo_policy` but never made it the default, so all data went to InfluxDB's `autogen` policy (kept forever) and the setting never took effect. On such a database the plugin now leaves your data where it is, because switching the default would hide all existing history from Grafana panels that don't name a retention policy, and logs a warning with the one command that applies the setting from then on:
+
+```sql
+ALTER RETENTION POLICY "indigo_policy" ON "indigo" DURATION 720d DEFAULT
+```
+
+After that, new data goes to `indigo_policy` and expires as configured; older data stays in `autogen` (query it as `"autogen"."device_changes"`). A database the plugin creates itself gets `indigo_policy` as its default straight away. A database that already existed without `indigo_policy` (for example one other tools write to as well) keeps its default policy too; the warning then shows the `CREATE RETENTION POLICY ... DEFAULT` command instead, because every writer that doesn't name a policy would use it. Changing the retention setting later alters the policy's duration. Managing retention needs an InfluxDB user with admin rights; without them the plugin logs a warning and keeps logging data.
 
 ### Inclusion / Exclusion Criteria
 
@@ -70,7 +85,11 @@ Control which devices and states are logged:
 - `batteryLevel`
 - HVAC states (`coolSetpoint`, `heatSetpoint`, `state.hvac_state`)
 
-**Minimum Update Frequency**: Configure how often to send updates even if values haven't changed. This prevents gaps in graphs for infrequently changing devices. Options: 5, 10, 15, 30, or 60 minutes.
+**Minimum Update Frequency**: Configure how often to send updates even if values haven't changed. This prevents gaps in graphs for infrequently changing devices. Options: 5, 10, 15, 30, or 60 minutes, or Disabled (no repeated updates; only real changes are sent).
+
+Changes made with the include/exclude buttons take effect when you click **Save**; **Cancel** discards them.
+
+If the global include list is empty, devices that are not in the include-devices list send nothing (only included devices are logged). Use **reset to default states** to restore the defaults.
 
 ## Advanced Features
 
@@ -80,8 +99,11 @@ Create sophisticated filtering rules to prevent bad data from reaching InfluxDB:
 
 * **Min/Max Value Filtering**: Only log values within a specific range
 * **Percentage Change Filtering**: Only log values if they haven't changed by more than a specified percentage
-* **Per-Device or Global Rules**: Apply filters to specific devices or all devices
+* **Per-Device or Global Rules**: Apply filters to all devices, to specific devices, or to all devices except some (for example an all-device setpoint range that a cooler's 34 °F setpoint would otherwise trip)
 * **Lock Minimum Updates**: Pause minimum frequency updates for devices that fail filters
+* **Order matters**: filters are evaluated in order and a value stops at the first filter it fails, so the order decides which filter's logging and lock settings apply
+
+Blocked values are recorded in `filter.log` in the plugin's log folder (`/Library/Application Support/Perceptive Automation/Indigo <version>/Logs/com.vtmikel.grafana/`); **Print filter blocks to Event Log** shows the latest ones. Filter names the plugin generated (for example `heatSetpoint (all devices) min: 30.0, max: 80.0`) follow the filter's settings when you edit it; a name you typed is kept.
 
 Access via: **Plugins → Grafana Home Dashboard → Configure data filters (advanced)**
 
@@ -93,6 +115,29 @@ Utility tools to help you understand what data is available:
 * **Explore State**: Find all devices that have a specific state
 
 Access via: **Plugins → Grafana Home Dashboard → Explore device/state**
+
+## AI Configuration (Indigo MCP Server)
+
+With the [Indigo MCP Server](https://github.com/mlamoure/indigo-mcp-server) plugin (2026.8.1 or later) installed, an AI assistant can read and change what this plugin logs. The plugin contributes tools prefixed `influxlog_`; nothing changes for users without the MCP Server.
+
+| Tool | What it does |
+|---|---|
+| `influxlog_get_status` | Connection state, server version, write counters (points written / dropped by reason), last write error, queue depth, devices locked by a filter |
+| `influxlog_get_config` | Every setting except the password (reported only as set / not set), the include and exclude lists with device names, the filters in order with their real scope, and the config revision |
+| `influxlog_explain_device` | For one device: which of its states are sent and why, which filters apply and whether the current value passes them |
+| `influxlog_search_states` | Find state keys, or the devices that have a given state and whether it is sent for each |
+| `influxlog_get_filter_blocks` | The latest values the filters blocked, parsed from `filter.log` |
+| `influxlog_set_device_mode` | Exclude a device, include all its states, or return it to the global include list |
+| `influxlog_update_included_states` | Add or remove global include states, or reset them to the defaults |
+| `influxlog_update_settings` | Minimum update frequency, retention (InfluxDB 1.x), debug flags |
+| `influxlog_update_connection` | Host, port, SSL, version, database, user and password/token — tested before it is saved |
+| `influxlog_reconnect` | Reconnect with the current settings (for example after a token was rotated) |
+| `influxlog_list_snapshots` / `influxlog_restore_snapshot` | Undo: every change is snapshotted first |
+| `influxlog_create_filter` / `influxlog_update_filter` / `influxlog_delete_filter` | Manage the data filters, including the "all devices except" scope; a filter is addressed by its position plus its expected name, so a filter that moved is never changed by mistake |
+
+Every change made through a tool can be dry-run first and can be checked against the configuration revision the AI read (`expected_revision`, so it can't overwrite a change it hasn't seen); it takes effect immediately, is snapshotted (the last 20 are kept, in `Preferences/Plugins/com.vtmikel.grafana.snapshots/` in the Indigo folder) and is recorded with one line in the Indigo Event Log (`MCP: ...`). The MCP Server's "Allow plugin-provided tools to make changes" setting switches all of them off.
+
+**The password/token** is write-only: no tool returns it and it is never logged or snapshotted. A connection change is tested (ping and a write-permission check that writes no data) before it is saved, and a failing test leaves the working settings in place. Setting the password through a tool does pass it through the AI conversation and its model provider; set it in the plugin's config dialog instead if that matters to you.
 
 ## Grafana Dashboard Setup
 
@@ -194,6 +239,32 @@ simply omit these fields rather than reporting as maximally stale.
 
 ## Version History
 
+### v2026.11.0 (Own InfluxDB client + fixes)
+Tested against InfluxDB 1.8.10 and InfluxDB 3 Core 3.12.0.
+
+- **Changed**: the plugin no longer uses the archived `influxdb` Python client (archived in 2024). It writes through a small client of its own built on the `requests` that ships with Indigo, so Indigo installs **no** packages for the plugin any more. Data is encoded exactly as before (verified byte for byte against the old client), so existing InfluxDB columns keep their types
+- **Fixed**: filter **Edit** has not worked since v2025.0.1 — the edit fields stayed disabled
+- **Fixed**: on InfluxDB 1.x a field type conflict was never recovered, so the affected device's points were dropped on every write
+- **Fixed**: on InfluxDB 1.x the retention setting never applied (see [Retention on InfluxDB 1.x](#retention-on-influxdb-1x)), and "Disabled (keep forever)" turned into a 30-day policy
+- **Fixed**: a revoked or wrong password/token was only noticed at debug level while every point was retried one by one and dropped; the plugin now logs an error and pauses until the credentials are corrected
+- **Fixed**: InfluxDB 1.x users without admin rights could never connect
+- **Fixed**: a lost connection no longer throws queued data away: points are kept (up to 10,000) and written once InfluxDB is back
+- **Fixed**: NaN or infinite values (for example a device address such as `2e928278`, which reads as a number) no longer make InfluxDB reject the device's whole point
+- **Fixed**: "Disabled" minimum update frequency sent an update for every device on every poll
+- **Fixed**: Cancel in the plugin config dialog did not undo include/exclude button changes
+- **Fixed**: an empty global include list sent every state of every device, and after a restart stopped the plugin from connecting
+- **Fixed**: a blank or non-numeric port crashed the plugin; the config dialog now validates the connection settings
+- **Fixed**: `filter.log` was always written under an `Indigo 2025.1` folder in your home folder; it now lives in Indigo's log folder for the plugin (an existing file is moved)
+- **Fixed**: deleting several filters at once could delete the wrong ones; "insert at" past the end placed a new filter second-to-last; editing a percent-change filter re-enabled its lock option
+- **Fixed**: a briefly missing state (a device offline) was removed from the include list for good
+- **Fixed**: a change only in letter case, or to an empty text, waited for the next heartbeat
+- **Fixed**: the change-detection cache was capped below the size of a large Indigo database, re-sending unchanged states
+- **Changed**: a locked device is logged when it is locked and when it is released, instead of every minute; much less debug output in `plugin.log`
+- **Removed**: settings left over from plugin version 2.x, including a stored Grafana admin password
+- **New**: AI configuration through the Indigo MCP Server: 15 `influxlog_*` tools (see [AI Configuration](#ai-configuration-indigo-mcp-server))
+- **New**: filters can apply to "all devices except" the ones you pick (stored with the existing filter format, so going back to an older release keeps every filter; an "all devices except" filter then applies to all devices again)
+- **Changed**: if the configuration changes elsewhere (for example through an MCP tool) while the plugin config dialog is open, saving the dialog applies your changes on top instead of overwriting the other ones
+
 ### v2026.8.0 (Filter Fixes + Device Liveness)
 - **New**: device liveness fields on every point — tell a dead sensor from a quiet one (see [Device Liveness Fields](#device-liveness-fields))
 - **Fixed**: "percent changed" filters were ignored during the periodic minimum-frequency update, so a bad value the filter had blocked could still reach InfluxDB on the next heartbeat
@@ -267,4 +338,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Disclaimer
 
-This plugin is provided as-is with no warranty. While it has been tested with Indigo 2025.1, use at your own risk. Always backup your Indigo database before installing plugins.
+This plugin is provided as-is with no warranty. While it has been tested with Indigo 2025.2, use at your own risk. Always backup your Indigo database before installing plugins.

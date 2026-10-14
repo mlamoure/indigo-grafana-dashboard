@@ -74,7 +74,7 @@
 	<Field id="simpleSeparator3" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="separator"/>
 
 	<Field id="InfluxRetentionInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="connection" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>Configure how long InfluxDB will retain data. Older data beyond this period will be automatically deleted by InfluxDB. This policy will be created on your InfluxDB server if it doesn't exist.
+		<Label>InfluxDB 1.x only: how long InfluxDB will retain data. Older data beyond this period will be automatically deleted by InfluxDB. The plugin creates the retention policy "indigo_policy" as the database's default. A database that already keeps its data in "autogen" (installs from before plugin version 2026.11.0) is left as it is, and the Event Log explains how to apply the setting. InfluxDB 3 manages retention on the server.
 		</Label>
 	</Field>
 
@@ -141,7 +141,7 @@
 </Field>
 
 	<Field id="IncStatesInstruction" visibleBindingId="listConfigurationSelector" visibleBindingValue="device" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-		<Label>States from this list will be sent to Influx/Grafana for all devices in your Indigo database, unless the device is excluded in the section below.  The device does not need to be added to the "Include specific device" section in order to be sent.
+		<Label>States from this list will be sent to Influx/Grafana for all devices in your Indigo database, unless the device is excluded in the section below.  The device does not need to be added to the "Include specific device" section in order to be sent.  Changes made with the buttons below take effect when you click Save; Cancel discards them.
 		</Label>
 	</Field>
 

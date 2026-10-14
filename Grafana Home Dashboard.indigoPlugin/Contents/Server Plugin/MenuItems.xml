@@ -10,7 +10,7 @@
 		</Field>
 
 		<Field id="FilterValuesInstruction2" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-			<Label>The "order" of filters only affects the logging to the Event log.  For example, you can have a filter rule that applies to a single device / state combo (for example, a common state such as SensorValue) that misbehaves regularly, and turn logging off.  Then a second rule can apply to all devices, on the same state (SensorValue), with logging on.  This way, you'll only see log messages for devices that are not expected to behave badly.
+			<Label>Filters are evaluated in order, and a value stops at the first filter it fails, so the order decides which filter blocks it: that filter's Event Log setting and lock option are the ones that apply.  For example, you can have a filter rule that applies to a single device / state combo (for example, a common state such as SensorValue) that misbehaves regularly, and turn logging off.  Then a second rule can apply to all devices, on the same state (SensorValue), with logging on.  This way, you'll only see log messages for devices that are not expected to behave badly.
 			</Label>
 		</Field>
 
@@ -116,14 +116,18 @@
 			<Label>Maximum value:</Label>
 		</Field>
 
-		<Field id="filterAllDevices" type="checkbox" defaultValue="true" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
-				<Label>Applies to all devices:</Label>
-				<Description>Enable</Description>
-				<CallbackMethod>filterAllDevicesChanged</CallbackMethod>
+		<Field id="filterScope" type="menu" defaultValue="all" visibleBindingId="filterAction" visibleBindingValue="edit,add" enabledBindingId="editMode">
+				<Label>Applies to:</Label>
+				<List>
+					<Option value="all">all devices</Option>
+					<Option value="devices">only the devices selected below</Option>
+					<Option value="all_except">all devices except those selected below</Option>
+				</List>
+				<CallbackMethod>filterScopeChanged</CallbackMethod>
 		</Field>
 
 		<Field id="listDevicesInstruction" visibleBindingId="filterAction" visibleBindingValue="edit,add" type="label" fontColor="darkgray" fontSize="small" alignWithControl="false">
-			<Label>If selecting specific devices that this filter applies to, you may use the Command or Shift key to select multiple devices from this list.</Label>
+			<Label>Select the devices the filter applies to, or for "all devices except", the devices it skips (for example a cooler whose setpoints are legitimately outside a thermostat range). Use the Command or Shift key to select several.</Label>
 		</Field>
 
 		<Field id="deviceListVisible" hidden="true" type="checkbox" defaultValue="false">
@@ -132,7 +136,7 @@
 		</Field>
 
 		<Field type="list" id="listDevices" rows="12" alwaysUseInDialogHeightCalc="true" visibleBindingId="deviceListVisible" visibleBindingValue="true">
-			<Label>Devices this filter applies to:</Label>
+			<Label>Devices:</Label>
 			<List class="indigo.devices" dynamicReload="true" />
 		</Field>
 

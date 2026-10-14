@@ -10,12 +10,24 @@ def to_bool(value):
 	"""Convert a string representation to a real boolean ('False' -> False)."""
 	return str(value).strip().lower() in ('true', 't', '1', 'yes', 'on')
 
-# Type converter mapping (replaces eval() for security)
+def to_int(value):
+	"""int('3.0') raises, yet every number reaches the plugin as a float (see
+	smart_value), so accept a float string with an integral value."""
+	try:
+		return int(value)
+	except ValueError:
+		number = float(value)
+		if not number.is_integer():
+			raise
+		return int(number)
+
+# Type converter mapping (replaces eval() for security).  Keys are the type
+# names InfluxDB 1.x reports in type-conflict errors, plus the plugin's own.
 TYPE_CONVERTERS = {
-	'int': int,
+	'int': to_int,
 	'str': str,
 	'float': float,
-	'integer': int,  # InfluxDB sometimes returns "integer"
+	'integer': to_int,  # InfluxDB sometimes returns "integer"
 	'string': str,   # InfluxDB sometimes returns "string"
 	'bool': to_bool,
 	'boolean': to_bool
@@ -71,14 +83,24 @@ class JSONAdaptor():
 		# Class Properties on http://wiki.indigodomo.com/doku.php?id=indigo_7_documentation:device_class
 		self.stringonly = 'displayStateValRaw displayStateValUi displayStateImageSel protocol'.split()
 
-		# have the json serializer always use this
-		json.JSONEncoder.default = indigo_json_serial
-
-		# remember previous states for diffing, smaller databases
+		# remember previous states for diffing, smaller databases.  Keyed by device
+		# id, so a rename doesn't orphan an entry; bounded by the device count and
+		# pruned of deleted devices (prune_cache).  The old 1000-entry cap was
+		# below production's device count and evicted ~12,000 entries a day,
+		# each eviction re-sending every included state of that device.
 		self.cache = {}
-		self.cache_max_size = 1000  # Limit cache to prevent unbounded growth
 		# remember column name/type mappings to reduce exceptions
 		self.typecache = {}
+
+	def forget(self, device_id):
+		self.cache.pop(device_id, None)
+
+	def prune_cache(self, device_ids):
+		"""Drop cache entries for devices that no longer exist."""
+		keep = set(device_ids)
+		# list(): device updates add entries from another thread meanwhile
+		for device_id in [key for key in list(self.cache) if key not in keep]:
+			self.cache.pop(device_id, None)
 
 	# returns None or a value, trying to convert strings to floats where
 	# possible
@@ -193,38 +215,31 @@ class JSONAdaptor():
 
 		return newjson
 
-	def diff_to_json(self, device, includeStates = [], updateCheck = True):
-		# strip out matching values?
-		# find or create our cache dict
+	def diff_to_json(self, device, includeStates=None, updateCheck=True):
+		"""The changed keys of a device worth sending, or None when nothing is.
+
+		includeStates=None sends every state (an included device); a list sends
+		only those keys - an EMPTY list sends nothing.  It used to mean "all",
+		so an emptied global include list sent every state of every device."""
 		newjson = self.to_json(device)
 
 		if self.JSONDebug:
 			self.logger.debug("currently in: diff_to_json for " + device.name)
 
-		localcache = {}
-		if device.name in list(self.cache.keys()):
-			localcache = self.cache[device.name]
+		localcache = self.cache.get(device.id, {})
+		includeAll = includeStates is None
+		includeSet = set() if includeAll else set(includeStates)
 
 		diffjson = {}
 		hasUpdate = False
 		for kk, vv in newjson.items():
 
-			# Check if it's changed
+			# Check if it's changed.  An exact comparison: a change only in letter
+			# case, or to "", is a change and is sent now, not at the next heartbeat.
 			if kk not in localcache or localcache[kk] != vv or not updateCheck:
 
-				if updateCheck:
-					try:
-						if kk in localcache and isinstance(vv, str) and (str(localcache[kk]).encode('utf-8').lower() == str(vv).encode('utf-8').lower() or len(str(vv).encode('utf-8')) == 0):
-							if self.TransportDebugL2:
-								self.logger.debug('NOT sending property: ' + kk + " to InfluxDB for device: " + device.name + " because the value NOT has changed.  Prev value: " + str(localcache[kk]) + ", new value: " + str(vv))
-
-							continue
-					except (AttributeError, UnicodeDecodeError):
-						# Encoding comparison failed, treat as changed
-						pass
-
 				# either the key is in the include states, the entire device needs to be sent
-				if (kk in includeStates) or len(includeStates) == 0:
+				if includeAll or kk in includeSet:
 					if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 						diffjson[kk] = vv
 
@@ -246,15 +261,7 @@ class JSONAdaptor():
 
 			return None
 			
-		if not device.name in list(self.cache.keys()):
-			# Implement simple cache eviction: remove oldest entry if cache is full
-			if len(self.cache) >= self.cache_max_size:
-				# Remove the first (oldest) entry
-				oldest_key = next(iter(self.cache))
-				del self.cache[oldest_key]
-				self.logger.debug(f"Cache full, evicted oldest entry: {oldest_key}")
-			self.cache[device.name] = {}
-		self.cache[device.name].update(newjson)
+		self.cache.setdefault(device.id, {}).update(newjson)
 
 		# always make sure these survive
 		diffjson['name'] = device.name

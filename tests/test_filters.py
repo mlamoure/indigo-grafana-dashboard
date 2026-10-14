@@ -1,290 +1,191 @@
 """
-Tests for data filtering functionality.
-
-Tests min/max value filtering, percentage change filtering,
-device-specific filters, and filter logging.
+Data filters: issue #12 items 1 (Edit broken), 12 (lock re-enabled on edit), and
+the low items (delete order, insert-at past the end, non-numeric values, stale
+generated names, filter.log location).
 """
 
+import logging
+import os
+
 import pytest
-from unittest.mock import Mock, MagicMock
-
-
-class InfluxFilter:
-    """Mock InfluxFilter class for testing."""
-
-    def __init__(self, property_name, strategy='minMax', min_value=None, max_value=None,
-                 percent_change=None, applies_to_all=True, device_list=None,
-                 log_failures=False, prevent_minimum_updates=True):
-        self.property = property_name
-        self.strategy = strategy
-        self.min = min_value
-        self.max = max_value
-        self.percent = percent_change
-        self.appliesToAll = applies_to_all
-        self.deviceList = device_list or []
-        self.logFailures = log_failures
-        self.preventMinimumUpdates = prevent_minimum_updates
-
-    def applies_to_device(self, device_id):
-        """Check if filter applies to device."""
-        if self.appliesToAll:
-            return True
-        return device_id in self.deviceList
-
-    def check_value(self, value, previous_value=None):
-        """Check if value passes filter."""
-        if self.strategy == 'minMax':
-            if self.min is not None and value < self.min:
-                return False
-            if self.max is not None and value > self.max:
-                return False
-            return True
-
-        elif self.strategy == 'percentChanged':
-            if previous_value is None:
-                return True
-            if previous_value == 0:
-                return value == 0  # Avoid division by zero
-            percent_change = abs((value - previous_value) / previous_value * 100)
-            return percent_change <= self.percent
-
-        return True
-
-
-class TestMinMaxFiltering:
-    """Test min/max value filtering."""
-
-    def test_min_filter_pass(self):
-        """Test value passes minimum filter."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100)
-
-        assert filter.check_value(50) is True
-        assert filter.check_value(0) is True
-        assert filter.check_value(100) is True
-
-    def test_min_filter_fail(self):
-        """Test value fails minimum filter."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100)
-
-        assert filter.check_value(-10) is False
-        assert filter.check_value(150) is False
-
-    def test_max_filter_only(self):
-        """Test max filter without min."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=None, max_value=100)
-
-        assert filter.check_value(50) is True
-        assert filter.check_value(-100) is True
-        assert filter.check_value(100) is True
-        assert filter.check_value(101) is False
-
-    def test_min_filter_only(self):
-        """Test min filter without max."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=None)
-
-        assert filter.check_value(50) is True
-        assert filter.check_value(1000) is True
-        assert filter.check_value(0) is True
-        assert filter.check_value(-1) is False
-
-    def test_temperature_range(self):
-        """Test realistic temperature range filter."""
-        filter = InfluxFilter('temperature', strategy='minMax', min_value=-40, max_value=120)
-
-        # Valid temperatures
-        assert filter.check_value(72) is True
-        assert filter.check_value(-10) is True
-        assert filter.check_value(100) is True
-
-        # Invalid temperatures (sensor errors)
-        assert filter.check_value(-50) is False
-        assert filter.check_value(150) is False
-        assert filter.check_value(999) is False
-
-
-class TestPercentageChangeFiltering:
-    """Test percentage change filtering."""
-
-    def test_percent_change_pass(self):
-        """Test value passes percentage change filter."""
-        filter = InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10)
-
-        # 5% change - should pass
-        assert filter.check_value(105, previous_value=100) is True
-        # 10% change - should pass (at limit)
-        assert filter.check_value(110, previous_value=100) is True
-
-    def test_percent_change_fail(self):
-        """Test value fails percentage change filter."""
-        filter = InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10)
-
-        # 20% change - should fail
-        assert filter.check_value(120, previous_value=100) is False
-        # 50% change - should fail
-        assert filter.check_value(150, previous_value=100) is False
 
-    def test_percent_change_decrease(self):
-        """Test percentage change with decreasing values."""
-        filter = InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10)
+import plugin as plugin_module
+from conftest import FakeDevice, FakeDict
+from plugin import InfluxFilter
 
-        # 5% decrease - should pass
-        assert filter.check_value(95, previous_value=100) is True
-        # 10% decrease - should pass
-        assert filter.check_value(90, previous_value=100) is True
-        # 20% decrease - should fail
-        assert filter.check_value(80, previous_value=100) is False
+
+def filter_record(state='sensorValue', strategy='minMax', lo=0.0, hi=100.0, pct=0.0, all_devices=True,
+                  devices=(), lock=True, log=False, name=''):
+    return [state, strategy, lo, hi, pct, all_devices, list(devices), lock, log, name]
 
-    def test_percent_change_no_previous(self):
-        """Test percentage change filter with no previous value."""
-        filter = InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10)
 
-        # First reading - should always pass
-        assert filter.check_value(100, previous_value=None) is True
+def form(**values):
+    base = {
+        'filterAction': 'add', 'filterName': '', 'filterOrder': '1', 'filterProperty': 'sensorValue',
+        'filterStrategy': 'minMax', 'filterPropertyMinValue': '0', 'filterPropertyMaxValue': '100',
+        'filterPropertyPercent': '', 'preventMinimumUpdates': True, 'filterAllDevices': True,
+        'listDevices': [], 'logFailures': False, 'listFilters': [],
+    }
+    base.update(values)
+    return FakeDict(base)
 
-    def test_percent_change_zero_previous(self):
-        """Test percentage change filter with previous value of zero."""
-        filter = InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10)
-
-        # Previous is 0 - should only pass if current is also 0
-        assert filter.check_value(0, previous_value=0) is True
-        assert filter.check_value(10, previous_value=0) is False
-
-    def test_percent_change_small_values(self):
-        """Test percentage change with small values."""
-        filter = InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10)
-
-        # 10% of 1 = 0.1
-        assert filter.check_value(1.09, previous_value=1.0) is True
-        assert filter.check_value(1.11, previous_value=1.0) is False
-
-
-class TestDeviceSpecificFilters:
-    """Test device-specific filter application."""
-
-    def test_global_filter(self):
-        """Test filter that applies to all devices."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100,
-                              applies_to_all=True)
-
-        assert filter.applies_to_device(123) is True
-        assert filter.applies_to_device(456) is True
-        assert filter.applies_to_device(789) is True
-
-    def test_device_specific_filter(self):
-        """Test filter for specific devices only."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100,
-                              applies_to_all=False, device_list=[123, 456])
-
-        assert filter.applies_to_device(123) is True
-        assert filter.applies_to_device(456) is True
-        assert filter.applies_to_device(789) is False
-
-    def test_multiple_filters_per_device(self):
-        """Test multiple filters applying to same device."""
-        filters = [
-            InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100),
-            InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10)
-        ]
-
-        # Value must pass all filters
-        value = 50
-        previous_value = 48
-
-        results = [f.check_value(value, previous_value) for f in filters]
-        assert all(results) is True
-
-        # Fail one filter
-        value = 150  # Fails min/max
-        results = [f.check_value(value, previous_value) for f in filters]
-        assert all(results) is False
-
-
-class TestFilterOrdering:
-    """Test filter processing order."""
-
-    def test_filter_order_matters(self):
-        """Test that filter order affects logging."""
-        # Filter 1: Specific device, logging disabled
-        filter1 = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100,
-                               applies_to_all=False, device_list=[123], log_failures=False)
-
-        # Filter 2: All devices, logging enabled
-        filter2 = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100,
-                               applies_to_all=True, log_failures=True)
-
-        # Process filters in order
-        filters = [filter1, filter2]
-
-        # For device 123, filter 1 applies first (no logging)
-        # For device 456, only filter 2 applies (logging enabled)
-
-        assert filter1.applies_to_device(123) is True
-        assert filter1.logFailures is False
-
-        assert filter2.applies_to_device(456) is True
-        assert filter2.logFailures is True
-
-
-class TestFilterLogging:
-    """Test filter failure logging."""
-
-    def test_log_failures_enabled(self):
-        """Test filter with logging enabled."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100,
-                              log_failures=True)
-
-        assert filter.logFailures is True
-
-    def test_log_failures_disabled(self):
-        """Test filter with logging disabled."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100,
-                              log_failures=False)
-
-        assert filter.logFailures is False
-
-
-class TestMinimumUpdateLocking:
-    """Test minimum update frequency locking after filter failure."""
-
-    def test_prevent_minimum_updates_enabled(self):
-        """Test locking of minimum updates when enabled."""
-        filter = InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10,
-                              prevent_minimum_updates=True)
-
-        assert filter.preventMinimumUpdates is True
-
-    def test_prevent_minimum_updates_disabled(self):
-        """Test minimum updates continue when disabled."""
-        filter = InfluxFilter('sensorValue', strategy='percentChanged', percent_change=10,
-                              prevent_minimum_updates=False)
-
-        assert filter.preventMinimumUpdates is False
-
-
-class TestEdgeCases:
-    """Test edge cases and error conditions."""
-
-    def test_none_value(self):
-        """Test filter with None value."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100)
-
-        # None values should be handled gracefully
-        # This might raise an exception or return False depending on implementation
-
-    def test_string_value_in_numeric_filter(self):
-        """Test filter receives string instead of number."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100)
-
-        # String values should be handled or raise appropriate error
-
-    def test_infinity_values(self):
-        """Test filter with infinity values."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100)
-
-        # Should handle float('inf') and float('-inf')
-
-    def test_nan_values(self):
-        """Test filter with NaN values."""
-        filter = InfluxFilter('sensorValue', strategy='minMax', min_value=0, max_value=100)
-
-        # Should handle float('nan')
+
+def test_edit_loads_a_device_scoped_filter(make_plugin, indigo):
+    """Item 1: FilterAction put the filter's set into valuesDict; indigo.Dict
+    refuses a set with TypeError, the except swallowed it at debug, and the edit
+    fields stayed disabled."""
+    indigo.devices.add(FakeDevice("Porch Sensor", dev_id=11))
+    indigo.devices.add(FakeDevice("Porch Sensor 2", dev_id=22))
+    plugin = make_plugin(listFilterList=[filter_record(all_devices=False, devices=[11, 22], name='Front Porch Luminance')])
+    values = form(filterAction='edit', listFilters=['0'])
+
+    values = plugin.FilterAction(values)
+
+    assert values['editMode'] is True
+    assert values['lockActionChange'] is True
+    assert values['deviceListVisible'] is True
+    assert list(values['listDevices']) == ['11', '22']
+    assert values['filterName'] == 'Front Porch Luminance'
+
+
+def test_edit_keeps_lock_setting_of_percent_filter(make_plugin):
+    """Item 12: editing a percentChanged filter turned 'lock minimum updates' back on."""
+    plugin = make_plugin(listFilterList=[filter_record(strategy='percentChanged', pct=25.0, lock=False)])
+    values = plugin.FilterAction(form(filterAction='edit', listFilters=['0']))
+    assert values['preventMinimumUpdates'] is False
+    assert values['percentVisible'] is True
+
+
+def test_edit_saves_in_place_and_regenerates_a_generated_name(make_plugin):
+    plugin = make_plugin(listFilterList=[filter_record(state='a', name='first'),
+                                         filter_record(state='heatSetpoint', lo=30.0, hi=80.0),
+                                         filter_record(state='c', name='third')])
+    values = plugin.FilterAction(form(filterAction='edit', listFilters=['1']))
+    assert values['filterName'] == 'heatSetpoint (all devices) min: 30.0, max: 80.0'
+    values['filterPropertyMinValue'] = '10'
+    plugin.SaveFilterValues(values)
+
+    assert [f.state for f in plugin.FilterList] == ['a', 'heatSetpoint', 'c']
+    assert plugin.FilterList[1].minValue == 10.0
+    assert plugin.FilterList[1].name == 'heatSetpoint (all devices) min: 10.0, max: 80.0'
+
+
+def test_custom_names_are_kept(make_plugin):
+    plugin = make_plugin(listFilterList=[filter_record(name='Front Porch Luminance')])
+    values = plugin.FilterAction(form(filterAction='edit', listFilters=['0']))
+    values['filterPropertyMaxValue'] = '5000'
+    plugin.SaveFilterValues(values)
+    assert plugin.FilterList[0].name == 'Front Porch Luminance'
+
+
+def test_stale_generated_name_is_refreshed_on_load(make_plugin, indigo):
+    """Production's 'energyCurLevel (all devices) ...' filter is scoped to ~280
+    specific devices; a generated name follows the filter's real settings."""
+    indigo.devices.add(FakeDevice("Meter 1", dev_id=1))
+    indigo.devices.add(FakeDevice("Meter 2", dev_id=2))
+    plugin = make_plugin(listFilterList=[filter_record(state='energyCurLevel', hi=500.0, all_devices=False,
+                                                       devices=[1, 2], name='energyCurLevel (all devices) min: 0.0, max: 500.0')])
+    assert plugin.FilterList[0].name == 'energyCurLevel (specific devices) min: 0.0, max: 500.0'
+
+
+def test_multi_delete_sorts_positions_as_numbers(make_plugin):
+    """Low item: positions were sorted as strings, so with 10+ filters the
+    wrong ones were deleted."""
+    records = [filter_record(state=f"s{i}", name=f"filter {i}") for i in range(12)]
+    plugin = make_plugin(listFilterList=records)
+
+    plugin.FilterAction(form(filterAction='delete', listFilters=['1', '9', '10']))
+
+    assert [f.name for f in plugin.FilterList] == [f"filter {i}" for i in range(12) if i not in (1, 9, 10)]
+    assert len(plugin.pluginPrefs['listFilterList']) == 9
+
+
+def test_insert_at_past_the_end_appends(make_plugin):
+    """Low item: 'insert at' past the end put the new filter second-to-last."""
+    plugin = make_plugin(listFilterList=[filter_record(state='a', name='a'), filter_record(state='b', name='b')])
+    plugin.SaveFilterValues(form(filterOrder='10', filterProperty='new'))
+    assert [f.state for f in plugin.FilterList] == ['a', 'b', 'new']
+
+
+def test_saved_filters_hold_lists_not_sets(make_plugin):
+    plugin = make_plugin()
+    plugin.SaveFilterValues(form(filterAllDevices=False, listDevices=['5', '3']))
+    record = plugin.pluginPrefs['listFilterList'][0]
+    assert list(record[6]) == [3, 5]
+    assert plugin.pluginPrefs['preferencesFilterVersion'] == '2.0.0'
+
+
+def test_percent_filter_requires_a_positive_threshold(make_plugin, caplog):
+    plugin = make_plugin()
+    with caplog.at_level(logging.ERROR, logger="Plugin"):
+        plugin.SaveFilterValues(form(filterStrategy='percentChanged', filterPropertyPercent='0'))
+    assert plugin.FilterList == []
+
+
+def test_min_max_filter_ignores_non_numeric_values(make_plugin, indigo, caplog):
+    """Low item: float(vv) raised on a non-numeric value and logged an ERROR on
+    every update."""
+    dev = indigo.devices.add(FakeDevice("Text Device", sensorValue='n/a'))
+    plugin = make_plugin(listFilterList=[filter_record()], listIncStates=['sensorValue'])
+    plugin.everConnected = True
+    with caplog.at_level(logging.ERROR, logger="Plugin"):
+        sent, locked = plugin.DeviceToInflux(None, dev, False)
+    assert sent
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert plugin.write_queue.queue[-1]['fields']['sensorValue'] == 'n/a'
+
+
+def test_blocked_value_goes_to_filter_log_in_indigos_log_folder(make_plugin, indigo):
+    """Item 11: filter.log was hard-coded under ~/Library/.../Indigo 2025.1/Logs."""
+    dev = indigo.devices.add(FakeDevice("Dometic CFX5 Cooler", coolSetpoint=33.8))
+    plugin = make_plugin(listFilterList=[filter_record(state='coolSetpoint', lo=50.0, hi=100.0)],
+                         listIncStates=['coolSetpoint'])
+    plugin.everConnected = True
+
+    plugin.DeviceToInflux(None, dev, False)
+
+    expected = os.path.join(indigo.server.getLogsFolderPath('com.vtmikel.grafana'), 'filter.log')
+    assert plugin.FilterLogFileLoc == expected
+    with open(expected) as log:
+        line = log.read()
+    assert "Filter block (coolSetpoint (all devices) min: 50.0, max: 100.0): a value (33.8) for state/property 'coolSetpoint' on device 'Dometic CFX5 Cooler'" in line
+    queued = plugin.write_queue.queue[-1]
+    assert 'coolSetpoint' not in queued['fields']
+
+
+def test_lock_is_logged_once_and_released_on_change(make_plugin, indigo, caplog):
+    """Low item: a locked device logged an INFO line on every 60-second poll."""
+    dev = indigo.devices.add(FakeDevice("Thermo", states={'temp': 70.0}, sensorValue=70.0))
+    plugin = make_plugin(listFilterList=[filter_record(strategy='percentChanged', pct=20.0, lock=True)],
+                         listIncStates=['sensorValue'], MinimumUpdateFrequency='5')
+    plugin.connected = True
+    plugin.everConnected = True
+
+    orig = FakeDevice("Thermo", dev_id=dev.id, sensorValue=70.0, states={'sensorValue': 70.0})
+    dev.sensorValue = 200.0
+    dev.states = {'sensorValue': 200.0}
+    with caplog.at_level(logging.INFO, logger="Plugin"):
+        plugin.deviceUpdated(orig, dev)
+        for _ in range(3):
+            plugin.UpdateAll()
+    locks = [r for r in caplog.records if 'is locked' in r.getMessage()]
+    assert len(locks) == 1
+    assert dev.id in plugin.deviceLocks
+
+    caplog.clear()
+    orig = FakeDevice("Thermo", dev_id=dev.id, sensorValue=200.0, states={'sensorValue': 200.0})
+    dev.sensorValue = 205.0
+    dev.states = {'sensorValue': 205.0}
+    with caplog.at_level(logging.INFO, logger="Plugin"):
+        plugin.deviceUpdated(orig, dev)
+    assert dev.id not in plugin.deviceLocks
+    assert any('no longer locked' in r.getMessage() for r in caplog.records)
+
+
+def test_generated_name_pattern():
+    f = InfluxFilter('sensorValue', 'percentChanged', 0, 0, 25, True, [], True, False)
+    assert f.name == 'sensorValue (all devices) percent: 25.0'
+    f.name = 'sensorValue (all devices) percent: 25.0'
+    assert f.customName == ''
+    f.name = 'My filter'
+    assert f.name == 'My filter'

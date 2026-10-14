@@ -4,35 +4,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Indigo plugin (v2025.0.0) that provides InfluxDB data logging for Indigo home automation. It connects to an external InfluxDB server and logs device/variable state changes for time-series visualization (typically used with Grafana).
+This is an Indigo plugin (current version in `Contents/Info.plist`) that provides InfluxDB data logging for Indigo home automation. It connects to an external InfluxDB server and logs device/variable state changes for time-series visualization (typically used with Grafana).
 
 **Bundle ID**: `com.vtmikel.grafana`
 
-**Key Architecture Decision**: This plugin is an InfluxDB client only - it does NOT bundle or manage server processes. Users must provide their own InfluxDB (1.7 or 1.8) and Grafana servers.
+**Key Architecture Decision**: This plugin is an InfluxDB client only - it does NOT bundle or manage server processes. Users must provide their own InfluxDB (1.7/1.8, or 3 via its v1 API) and Grafana servers.
+
+**Repos**: Gitea `lamoureux-household/indigo-grafana-dashboard` (branch `master`, full history) is the source of truth. GitHub `mlamoure/indigo-grafana-dashboard` is the public copy and is **squash-only since 2026.11.0**: one commit per release, private history stays on Gitea.
 
 ## Plugin Structure
 
 ```
 Grafana Home Dashboard.indigoPlugin/
 ├── Contents/
-│   ├── Info.plist                    # Plugin metadata (version 2025.0.0, API 3.6)
-│   ├── Resources/                    # Plugin icon
-│   ├── Packages/                     # Auto-installed dependencies (excluded from git)
+│   ├── Info.plist                    # Plugin metadata (PluginVersion, API 3.6)
+│   ├── Resources/                    # Plugin icon, mcp-manifest.json
 │   └── Server Plugin/
-│       ├── plugin.py                 # Main plugin class (~1100 lines, client-only)
+│       ├── plugin.py                 # Main plugin class: connection, writer thread, filters, config UI
+│       ├── influx_client.py          # In-house InfluxDB client: line-protocol encoder + HTTP calls
+│       ├── influx_settings.py        # Settings validation shared by the dialog, connect() and tools
+│       ├── influx_filter.py          # InfluxFilter (data filter rule), prefs record and dict form
+│       ├── config_store.py           # ConfigStore: every configuration change goes through apply()
+│       ├── mcp_api/                  # MCP tool provider (influxlog_* tools), imported lazily
+│       ├── Actions.xml               # hidden mcp_tool_invoke action only
 │       ├── json_adaptor.py           # Converts Indigo objects to InfluxDB format
 │       ├── PluginConfig.xml          # Two-panel config UI (Connection + Inclusion/Exclusion)
-│       ├── MenuItems.xml             # Advanced features (filters, device exploration)
-│       └── requirements.txt          # Python dependencies (auto-installed by Indigo)
-├── requirements.txt                  # Python dependencies (development reference)
+│       └── MenuItems.xml             # Advanced features (filters, device exploration)
+├── requirements.txt                  # dev/test only (pytest, influxdb==5.3.2 for the encoder comparison)
+├── tests/                            # pytest suite + tests/live (InfluxDB 1.8 + 3 container matrix)
+├── .gitea/workflows/test.yml         # CI: pytest on Python 3.13
 └── README.md                         # User documentation
 ```
+
+There is no `Server Plugin/requirements.txt`: the plugin uses the `requests` Indigo installs, so Indigo creates no `Contents/Packages`. Don't add one back.
 
 ## Core Components
 
 ### plugin.py
 The main plugin class extends `indigo.PluginBase` and manages:
-- **InfluxDB connection**: Connects to external InfluxDB 1.7/1.8 server
+- **InfluxDB connection**: Connects to external InfluxDB 1.7/1.8 or 3 server (`connect()` serialized by `connectionLock`, never on the callback thread - `requestReconnect()` runs it on a worker)
 - **Data pipeline**: Device/variable state changes → InfluxDB writes
 - **Filtering system**: Advanced filtering to prevent bad data (value ranges, percentage changes)
 - **Configuration**: Two-panel config (Connection settings + Inclusion/Exclusion criteria)
@@ -43,11 +53,31 @@ The main plugin class extends `indigo.PluginBase` and manages:
 - `InfluxFilter`: Data filtering rules (min/max values, percentage change thresholds)
 
 **Key State Variables**:
-- `connection`: InfluxDBClient instance
-- `connected`: Boolean connection status
-- `DeviceLastUpdatedList` / `VariableLastUpdatedList`: Track update times for minimum frequency updates. **Keyed by `dev.id` / `var.id` — never by name.** Element 2 of a device row is the `lockMinimumUpdates` lock. In-memory only; cleared on restart.
+- `connection`: `InfluxClient` instance (`influx_client.py`)
+- `connected` / `connectionState` (`connected`, `connecting`, `retrying`, `stopped_auth_failure`, `invalid_config`) / `lastConnectError`
+- `stats`: `WriteStats` - points written, dropped by reason (`queue_full`, `rejected`, `shutdown`, `gave_up`), last success, last error
+- `deviceLastUpdated` / `variableLastUpdated`: heartbeat clocks for the minimum update frequency, dicts **keyed by `dev.id` / `var.id` — never by name**. In-memory only; cleared on restart.
+- `deviceLocks`: devices a `percentChanged` filter locked out of heartbeats, `{dev id: {since, filter, state}}`. Logged once when taken and once when released (never per poll).
 - `DeviceLastWrittenValues` / `PercentChangedStates`: Baseline for `percentChanged` filters on the polling path (which has no `origDev`). Populated **after** filtering, so a blocked value never becomes the baseline that lets its successor through. Deliberately *not* the adaptor's cache — see below.
-- `FilterList`: Array of `InfluxFilter` objects for data validation
+- `FilterList`: Array of `InfluxFilter` objects for data validation. **Copy-on-write**: edits build a new list and assign it, so `DeviceToInflux` can iterate a snapshot without a lock
+- `StatesIncludeList` / `DeviceIncludeList` / `DeviceExcludeList`: guarded by `configLock` (RLock) - the concurrent thread rebuilds and persists them every 15 min while ConfigUI callbacks edit them
+- `dialog`: the plugin config dialog's working copy of the include lists; its buttons edit the copy, `closedPrefsConfigUi` commits it unless cancelled
+- `stateCatalog` (`{state: device count}`) / `deviceNames`: rebuilt by `BuildConfigurationLists`; the UI list generators compute from these
+
+### influx_client.py
+Replaces the archived `influxdb` 5.3.2 client (2026.11.0). The encoder reproduces 5.3.2's `make_line` **byte for byte** (`tests/test_line_protocol.py`; also checked against all ~1,900 production devices/variables) except: NaN/±inf fields are skipped, and a point with no fields is skipped. 5.3.2 escapes tag values like keys (its trailing-space `_escape_tag_value` helper is never called) - keep it that way. Errors: `InfluxConnectionError` (no response), `InfluxHTTPError` (status + decoded message; on InfluxDB 3 parse errors `point_index` names the bad point), `InfluxQueryError` (statement error inside a 200). `check_write_access()` is an empty write: 204 on 1.x; on 3 the token is checked and the empty body refused with 400 (= accepted). On InfluxDB 3 that empty write creates a missing database, as any write would.
+
+### config_store.py — the one owner of configuration changes (#11)
+The configuration still lives on the Plugin object (the write pipeline reads it on every device change), but **every change goes through `ConfigStore.apply(source, mutate, dry_run, expected_revision)`**: lock → revision check → mutate a plain copy (`current()`, which has **no secrets**) → diff → `load()` into the plugin → `persistConfig()` → revision + 1 (persisted as the `configRevision` pref). Sources: the plugin config dialog (`commitDialog`), the filters dialog, housekeeping (pruning deleted devices from lists and filter scopes), and the MCP tools. Never assign `StatesIncludeList` / `FilterList` / settings directly from new code.
+- The plugin config dialog records `dialogBase()` (revision + the config it opened with) and on save **three-way merges** its changes onto the current config, so an AI edit made while the dialog was open survives; the password is merged the same way by hand (it is never in the store).
+- `persistConfig()` writes every plugin-owned pref, connection settings only once `configured` (their presence is what marks the plugin as configured).
+- The filters dialog's Edit records `filterEditGuard` (position, name); a save refuses if that position no longer holds that filter.
+- **Snapshots**: `beforeCommit` writes the config being replaced to `<Indigo>/Preferences/Plugins/com.vtmikel.grafana.snapshots/<revision>.json` (last 20 kept). `restore_snapshot` restores states/lists/filters/settings, **never the connection**.
+- **Password changes** bump `connection.credentials_version` (an in-memory counter in the secret-free config), so a password-only change is still a revision and a snapshot without the store ever holding the secret.
+
+### MCP tool provider (`mcp_api/`, #11)
+Contract: `docs/mcp-provider-manifest.md` in indigo-mcp-server. `Contents/Resources/mcp-manifest.json` (prefix `influxlog` → ContextForge `indigo-influxlog-*`), hidden action `mcp_tool_invoke` in `Actions.xml`, `handle_mcp_tool_invoke` imports `mcp_api` **lazily**, `broadcastToSubscribers("mcp_tools_updated")` at startup. `tests/test_mcp_manifest.py` keeps the manifest, `InfluxLogTools.TOOLS`, the handler signatures and Actions.xml in sync. Tools resolve devices by id or exact name (close-match suggestions), put the name next to every id, and use `adaptor.to_json` - **never `diff_to_json`**, which updates the change-detection cache. The InfluxDB password/token never appears in any output (`test_no_secret_anywhere` sweeps replies, log records and snapshot files).
+Write tools go through `InfluxLogTools._write` → `store.apply` (dry_run, expected_revision, snapshot, one `MCP: <tool> <summary> (revision N)` INFO line). `update_connection` returns an `AsyncResult`: `handle_mcp_tool_invoke` takes `indigo.acquireCallbackCompleteHandler()` and finishes on an `InfluxToolWorker` thread, because its test-then-commit (`Plugin.testConnection`: ping + empty-write access check) does network I/O. A failed test leaves the settings in force unless `force`.
 
 ### json_adaptor.py
 Converts Indigo device objects to InfluxDB-compatible JSON format:
@@ -94,7 +124,14 @@ Converts Indigo device objects to InfluxDB-compatible JSON format:
 **IMPORTANT**: This plugin supports InfluxDB **1.7/1.8** and **InfluxDB 3** (via its v1 compatibility API, selected with the "InfluxDB Version" dropdown in the connection config). It is **NOT compatible** with InfluxDB 2.x. In InfluxDB 3 mode the plugin skips database/retention DDL (servers are pre-provisioned and token-scoped) and drops fields that duplicate tag keys (IOx requires a column to be tag XOR field).
 
 ### Write Pipeline (v2026.7.0+)
-Writes are asynchronous: producers (`deviceUpdated`, `variableUpdated`, `UpdateAll`) enqueue points with client-side timestamps; a single background writer thread batches them into one `write_points()` call per ~1s flush window (`influxWriterLoop` in plugin.py). This matters because InfluxDB 3 acknowledges each HTTP write only after its WAL flush (~1s default), so synchronous per-point writes cap at ~1 point/sec and back up Indigo's callback queue — which is what made the config dialog unresponsive. Never reintroduce network I/O into Indigo callback methods.
+Writes are asynchronous: producers (`deviceUpdated`, `variableUpdated`, `UpdateAll`) enqueue points with client-side timestamps; a single background writer thread batches them into one `write_points()` call per ~1s flush window (`influxWriterLoop` in plugin.py). This matters because InfluxDB 3 acknowledges each HTTP write only after its WAL flush (~1s default), so synchronous per-point writes cap at ~1 point/sec and back up Indigo's callback queue — which is what made the config dialog unresponsive. Never reintroduce network I/O into Indigo callback methods (that includes `connect()`: startup and `closedPrefsConfigUi` leave it to the concurrent thread / `requestReconnect()`).
+
+**Error classification (2026.11.0, `writeBatch`)** - by HTTP status, never by retrying point by point first:
+- **401/403** → credentials refused: `onAuthFailure` (ERROR once, `StopConnectionAttempts`), batch kept, producers stop (`acceptingPoints()` false) until the settings change.
+- **404 / 5xx / network** → transient: batch kept, `markDisconnected` → reconnect worker; the writer **pauses** (never drains the queue) while disconnected, and producers keep buffering into the 10,000-point queue once a connection has been made. A batch failing `MAX_BATCH_ATTEMPTS` times is dropped (`gave_up`).
+- **400** → data problem: type conflicts are corrected from the **decoded** message (1.x `input field "x" ... already exists as type y`; 3 `column 'x', expected iox::column_type::field::y`) and the typecache learns. 1.x `partial write` means the valid points were stored (only re-send points with the corrected field). InfluxDB 3 rejects the whole batch and names the first bad line → drop that point, retry the rest. Only a 1.x whole-batch 400 without a line falls back to per-point.
+
+**InfluxDB 1.x retention (decision 2026-10-14)**: `indigo_policy` is created as the database **DEFAULT** only on a database the plugin itself just created (`createDatabase` compares `SHOW DATABASES` before its `CREATE DATABASE`); ALTERed when it is the default and the duration differs; `-1` = `INF`. Every other database is left alone with one WARNING and the opt-in command: an install from before 2026.11.0 (non-default `indigo_policy`, data in `autogen`) gets `ALTER ... DEFAULT`, a pre-existing database without the policy (possibly shared with other writers) gets `CREATE ... DEFAULT`. Switching a default would hide history from Grafana panels that don't name a policy and put other writers' data on this plugin's schedule. `CREATE DATABASE` and retention are best effort (non-admin users connect fine).
 
 ### Device Liveness Fields (v2026.8.0+)
 `diff_to_json` emits `lastChanged`, `lastSuccessfulComm` and derived `secondsSinceLastChanged` / `secondsSinceLastSuccessfulComm` on **every** device point, so a flat line from a *dead* device is distinguishable from a flat line from a merely *quiet* one.
@@ -108,88 +145,41 @@ The age fields exist because InfluxQL cannot express `now() - field` in a `SELEC
 `LIVENESS_SENTINEL_FLOOR` is `2000-01-02T00:00Z`, not `2000-01-01T00:00Z`. Indigo's never-communicated placeholder is 2000-01-01 in **local** time, so on any server west of UTC it lands above a UTC-midnight floor and those devices report as ~26 years stale.
 
 ### Python Compatibility
-- Requires Python 3.11+ (Indigo 2025.1)
-- Uses pip requirements from `requirements.txt`
-- Dependencies are auto-installed by Indigo to `Contents/Packages/` directory
+- Python 3.11+ (Indigo 2025.1); production runs Indigo 2025.2 on Python 3.13 - the suite runs on 3.13
+- **No third-party packages of its own.** `requests` is part of Indigo's own install set (`IndigoPluginHost3.app/Contents/Resources/installer_requirements.txt`: requests 2.32.5 on 2025.2; 2.31.0 on 2025.1's Python 3.11). Before 2026.11.0 a `Server Plugin/requirements.txt` made Indigo pip-install `influxdb` plus msgpack/pytz/dateutil/six/requests into `Contents/Packages`, ahead of Indigo's own packages on the import path.
 
-### Python Dependencies
-The plugin requires these packages (see `Server Plugin/requirements.txt`):
-- `influxdb==5.3.2` - InfluxDB 1.x client library
-- `requests==2.32.5` - HTTP library (required by influxdb)
-- `msgpack==1.1.2` - MessagePack serialization
-- `pytz==2025.2` - Timezone support
-
-**Dependency Management**:
-- `requirements.txt` in `Server Plugin/` directory is read by Indigo
-- Indigo automatically installs packages to `Contents/Packages/` on plugin load
-- `Contents/Packages/` is excluded from git (auto-generated)
-- Root `requirements.txt` is kept for development reference only
-
-**No manual installation required** - Indigo handles this automatically!
+### Plugin prefs
+- `InfluxRetention` and `MinimumUpdateFrequency` are stored as **strings** (`'24'`, `'15'`, `'-1'`); parse with `influx_settings` (`parse_frequency`, `retention_spec`). Frequency `-1` = no heartbeats; legacy `'smart'` = heartbeats only 23:45-00:15.
+- Never configured = no `InfluxHost` pref (the dialog has never been saved). An empty `listIncStates` is a valid configuration (only included devices are logged), not "unconfigured".
+- Indigo stores the dialog's **whole** valuesDict on save, including the stale copies of plugin-owned keys (`listFilterList`, the include lists) from when it opened - `closedPrefsConfigUi` re-asserts them via `persistConfig()`.
+- `OBSOLETE_PREFS` (v2.x leftovers incl. a plaintext `GrafanaAdminPassword`) are deleted at startup. **Never print prefs without redacting `*Password*`.**
+- `filter.log` lives in `indigo.server.getLogsFolderPath(pluginId)`; releases before 2026.11.0 wrote to `~/Library/.../Indigo 2025.1/Logs/...` and the file is moved once.
 
 ## Development Workflow
 
-### Testing Locally
+### Tests
 ```bash
-# Deploy to production Indigo server (requires mounted network share)
-# IMPORTANT: Ensure /Volumes/Perceptive Automation is mounted first
-cd /Users/mike/Mike_Sync_Documents/Programming/mike-local-development-scripts
-source .venv/bin/activate.fish  # or .venv/bin/activate for bash
-./deploy_indigo_plugin_to_server.sh "Grafana Home Dashboard.indigoPlugin"
-
-# After deployment, manually restart the plugin in Indigo
-
-# For local testing (if Indigo installed locally at /usr/local/indigo/)
-python restart_indigo_plugin.py "/path/to/Grafana Home Dashboard.indigoPlugin"
-# or
-python restart_indigo_plugin.py com.vtmikel.grafana
+uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/pytest tests/ -q              # offline suite (fake indigo, see tests/README.md)
+tests/live/run_influx_matrix.sh         # live influxdb:1.8 + influxdb:3-core matrix (Docker)
 ```
+`conftest.py`'s fake `indigo.Dict` rejects sets/None like the real one - keep it strict. **Every release must pass the live matrix first**, and the README's release notes name the versions it printed. InfluxDB 3 Core allows 5 databases per server: live v3 tests share one database and use unique measurements.
+
+### Deploying to production
+```bash
+/home/mike/programming/mike-local-development-scripts/deploy_indigo_plugin_to_server.sh \
+    "Grafana Home Dashboard.indigoPlugin" /home/mike/programming/indigo-grafana-dashboard
+ssh mike@indigo.home.mikelamoureux.net 'bash -c "/usr/local/indigo/indigo-restart-plugin com.vtmikel.grafana"'
+```
+Check `/Library/Application Support/Perceptive Automation/Indigo 2025.2/Logs/com.vtmikel.grafana/plugin.log` afterwards.
 
 ### Releasing
+Merge on Gitea first, pass the live matrix, then (the first argument is the **clone's folder name**):
 ```bash
-cd /Users/mike/Mike_Sync_Documents/Programming/mike-local-development-scripts
-source .venv/bin/activate.fish
-
-# Generate release notes to file (recommended for Claude Code)
-cat > /tmp/release_notes.md << 'EOF'
-## What's New
-- List changes here
-
-## Bug Fixes
-- List fixes here
-EOF
-
-# Create release on BOTH GitHub and Gitea (auto-detected if 'local_gitea' remote exists)
-./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" -y --notes-file /tmp/release_notes.md
-
-# GitHub only (skip Gitea)
-./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" -y --no-gitea --notes-file /tmp/release_notes.md
-
-# Gitea only (skip GitHub)
-./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" -y --gitea-only --notes-file /tmp/release_notes.md
-
-# Recover from a botched release: re-attach the zip to an existing tag
-# without re-creating the tag, push, or release notes
-./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" -y --attach-only v2026.1.0
-
-# Draft for review first
-./release_indigo_plugin_to_github.sh "Grafana Home Dashboard.indigoPlugin" --draft --notes-file /tmp/release_notes.md -y
+/home/mike/programming/mike-local-development-scripts/release_indigo_plugin_to_github.sh \
+    indigo-grafana-dashboard ~/programming -y --squash --notes-file /path/to/notes.md
 ```
-
-**Release Script Features** (as of 2026-05-02):
-- Auto-extracts version from `Info.plist` via the shared `lib/plist.sh` helper
-- Creates git tag (v{version})
-- Packages plugin using `package_indigo_plugin_for_release.sh`
-- Removes `Contents/Packages` and `.gitignore` files from release zip
-- Auto-detects `local_gitea` remote and publishes there alongside GitHub
-- `--attach-only <tag>` recovery mode for re-uploading without re-creating the release
-- `--dry-run` to preview without executing
-- Gitea token is pulled from Vault (`claude/api-tokens/gitea`) automatically;
-  override with `GITEA_TOKEN` env var if you need a one-off
-- Override `GITEA_API_BASE` env var to point at a non-default Gitea host
-- Override package destination with `INDIGO_RELEASE_DIR` env var
-
-**New exit code**: `6` — Gitea-specific failure (network, API, or token).
+`--squash` publishes one commit to GitHub (`Release <version>`) and pushes the tag there; the script also creates the annotated Gitea tag and the Gitea release with the same notes and the zip. It finds the Gitea remote by host (`origin` via the `gitea:` alias works) and stops before pushing anything if the Gitea side can't be done. Grep the notes for family names first - the GitHub copy is public. Alignment check: `git rev-parse origin/master^{tree}` vs `github/master^{tree}` (commit SHAs differ in squash mode).
 
 ## Common Constants (plugin.py)
 
@@ -220,18 +210,31 @@ DEFAULT_STATES = [
 - Authorization failures stop connection attempts (requires config fix)
 
 ### Filter System
-The data filtering system (`filterValues` menu item) is complex:
-- Filters are ordered and processed sequentially
+The data filtering system (`filterValues` menu item, `influx_filter.py`) is complex:
+- Filters are ordered and processed sequentially; a value stops at the first filter it fails (order decides whose lock/log applies)
 - Can lock minimum frequency updates after failures
-- Silent logging to `filter.log` + optional Event Log logging
-- Supports both global (all devices) and specific device rules
+- Silent logging to `filter.log` + optional Event Log logging (the `filter.log` line format is parsed by `mcp_api/filter_log.py` - change both together, including the `threshhold` typo)
+- Scope: `all`, `devices` (appliedDevices) or `all_except` (exceptDevices). The prefs record stays format **2.0.0**, with the except list as an optional 11th element: releases before 2026.11.0 read item[0..9] and ignore it, so a rollback keeps every filter (all_except reads as all). Don't bump the format number for additive fields - an older release then loads no filters at all, silently. 1.0.0 (and the pre-release "3.0.0") migrate on load. An unreadable format leaves `listFilterList` untouched in the prefs (`filtersUnreadable`) until the filters are edited explicitly
+- Generated names follow the settings (`GENERATED_FILTER_NAME`); a typed name is kept
 
 ### Inclusion/Exclusion Logic (plugin.py)
 1. **Excluded devices**: Never sent to InfluxDB (highest priority)
-2. **Included devices**: All states sent
-3. **All other devices**: Only global include states sent
+2. **Included devices**: All states sent (`diff_to_json(dev, None)` - `None` means all)
+3. **All other devices**: Only global include states sent (`diff_to_json(dev, list)` - an **empty** list sends nothing; before 2026.11.0 `[]` meant "all")
+
+Include states missing from every device right now (a device offline) are kept, not pruned. Deleted devices are pruned from the include/exclude lists, the adaptor cache (keyed by device id, no size cap) and the heartbeat/lock dicts.
 
 ## Version History
+
+### v2026.11.0 (Own InfluxDB client + code-review fixes, issue #12)
+- Archived `influxdb` client replaced by `influx_client.py` on Indigo's `requests`; `Server Plugin/requirements.txt` removed. Encoder byte-identical to 5.3.2 except NaN/inf and field-less points skipped
+- Write errors classified by status (see Write Pipeline); queued data survives an outage; writer thread can't die silently
+- 1.x: type-conflict recovery works again (decoded message), retention per the 2026-10-14 decision, non-admin users connect
+- Filter Edit fixed (set → list); edit keeps the lock flag; multi-delete sorts as numbers; insert-at clamps to last; non-numeric values pass min/max filters silently; generated filter names follow the settings
+- Config dialog: working copy (Cancel cancels), `validatePrefsConfigUi`, reconnect on a worker thread, `configLock`
+- Disabled heartbeat (-1) sends none; legacy 'smart' no longer raises
+- Empty include list no longer means "all states" nor "unconfigured"
+- filter.log in Indigo's log folder; obsolete v2.x prefs removed; adaptor cache keyed by id without the 1000 cap (production evicted ~12,000 entries/day); no process-wide JSONEncoder patch; exact string change detection; lock logged on take/release only; noisy debug lines gated behind TransportDebug
 
 ### v2026.8.0 (Filter Lock Fixes + Device Liveness)
 - **Fixed**: `DeviceLastUpdatedList` / `VariableLastUpdatedList` were keyed by id in `UpdateAll()` and by name in `deviceUpdated()` / `variableUpdated()`. The unlock was dead code, so a device locked by a `percentChanged` filter would have stayed locked for the life of the plugin process and silently stopped reaching InfluxDB. Latent — no `percentChanged` filter had ever blocked a value
@@ -276,15 +279,14 @@ The data filtering system (`filterValues` menu item) is complex:
 
 ## Indigo Plugin Development References
 
-- **Plugin Guide**: https://wiki.indigodomo.com/doku.php?id=indigo_2025.1_documentation:plugin_guide
-- **Object Model**: https://wiki.indigodomo.com/doku.php?id=indigo_2025.1_documentation:object_model_reference
-- **Local SDK**: `/Users/mike/Mike_Sync_Documents/Programming/IndigoSDK-2025.1`
+- **Docs**: https://docs.indigodomo.com/2025.2/ - fetch `https://docs.indigodomo.com/llms.txt` (index) or grep `llms-full.txt`; the HTML pages 403 automated fetches
+- **PluginBase source** (authoritative for callback contracts, e.g. `getPrefsConfigUiValues` returns the live `pluginPrefs`): `/Library/Application Support/Perceptive Automation/Indigo 2025.2/IndigoPluginHost3.app/Contents/Resources/PlugIns/plugin_base.py` on the Indigo Mac
 
 ## InfluxDB Setup Requirements
 
-Users must have an external InfluxDB 1.7 or 1.8 server configured. The plugin will:
-1. Create the database if it doesn't exist
-2. Set retention policy based on plugin configuration
+Users must have an external InfluxDB 1.7/1.8 or InfluxDB 3 server. On 1.x the plugin will:
+1. Create the database if it doesn't exist (when the user has admin rights)
+2. Manage the `indigo_policy` retention policy (see Write Pipeline → retention)
 3. Automatically connect and handle reconnections
 
 **Recommended InfluxDB Installation Methods**:

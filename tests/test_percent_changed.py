@@ -1,55 +1,13 @@
 """
-Tests for the percent-changed filter helpers introduced for issue #7.
-
-Unlike the other files in this directory, these exercise the REAL functions from
-plugin.py rather than re-implementing them locally. plugin.py imports `indigo` and
-`influxdb`, neither of which exists off an Indigo server, so both are stubbed into
-sys.modules before the import below.
+Tests for the percent-changed filter helpers introduced for issue #7.  They
+exercise the real functions from plugin.py; conftest.py supplies the fake indigo.
 """
-
-import os
-import sys
-import types
 
 import pytest
 
-PLUGIN_DIR = os.path.join(
-    os.path.dirname(__file__), '..',
-    'Grafana Home Dashboard.indigoPlugin/Contents/Server Plugin'
-)
-sys.path.insert(0, PLUGIN_DIR)
-
-
-def _install_stubs():
-    """Minimal stand-ins for the two modules only present on an Indigo server."""
-    if 'indigo' not in sys.modules:
-        indigo = types.ModuleType('indigo')
-
-        # Real classes, not Mocks: json_adaptor calls isinstance() against these and
-        # isinstance() raises TypeError when given a MagicMock as its second argument.
-        indigo.Dict = type('Dict', (dict,), {})
-        indigo.List = type('List', (list,), {})
-        indigo.PluginBase = type('PluginBase', (object,), {})
-        indigo.devices = []
-        indigo.variables = []
-        sys.modules['indigo'] = indigo
-
-    if 'influxdb' not in sys.modules:
-        influxdb = types.ModuleType('influxdb')
-        influxdb.InfluxDBClient = type('InfluxDBClient', (object,), {})
-        sys.modules['influxdb'] = influxdb
-
-        exceptions = types.ModuleType('influxdb.exceptions')
-        exceptions.InfluxDBClientError = type('InfluxDBClientError', (Exception,), {})
-        sys.modules['influxdb.exceptions'] = exceptions
-        influxdb.exceptions = exceptions
-
-
-_install_stubs()
-
-import plugin  # noqa: E402
-from plugin import numeric_value, percent_changed  # noqa: E402
-from json_adaptor import LIVENESS_FIELDS, LIVENESS_SENTINEL_FLOOR  # noqa: E402
+import plugin
+from plugin import numeric_value, percent_changed
+from json_adaptor import LIVENESS_FIELDS, LIVENESS_SENTINEL_FLOOR
 
 
 class TestNumericValue:

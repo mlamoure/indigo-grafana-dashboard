@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<Actions>
+	<!-- MCP tool provider endpoint, called by com.vtmikel.mcp_server via
+	     executeAction; advertised in Contents/Resources/mcp-manifest.json -->
+	<Action id="mcp_tool_invoke" uiPath="hidden">
+		<Name>MCP Tool Invocation Endpoint</Name>
+		<CallbackMethod>handle_mcp_tool_invoke</CallbackMethod>
+	</Action>
+</Actions>

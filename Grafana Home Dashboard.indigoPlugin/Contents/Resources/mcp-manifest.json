@@ -1,0 +1,645 @@
+{
+  "manifest_version": 1,
+  "provider": {
+    "plugin_id": "com.vtmikel.grafana",
+    "display_name": "Grafana Home Dashboard (InfluxDB logging)"
+  },
+  "tool_prefix": "influxlog",
+  "invoke_action_id": "mcp_tool_invoke",
+  "tools": [
+    {
+      "name": "get_status",
+      "write": false,
+      "timeout_seconds": 10,
+      "description": "Is logging to InfluxDB working? Connection state (connected / connecting / retrying / stopped_auth_failure / invalid_config / not_configured), host, port, InfluxDB version mode and database, the server's reported version, the last connection error; write counters since the plugin started (points written, points dropped by reason, last successful write, last write error with its HTTP status), the write-queue depth and capacity; and the devices a percent-change filter has locked out of heartbeats (since when, by which filter). Never returns the password or token.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "get_config",
+      "write": false,
+      "timeout_seconds": 15,
+      "description": "The plugin's logging configuration: connection settings (password_set true/false, never the secret), minimum update frequency, retention (applies to InfluxDB 1.x only), debug flags; the global include states with how many devices have each; the included devices (all their states are logged) and excluded devices (nothing is logged), each with id and name; the data filters in evaluation order (position, name, state, strategy, thresholds, scope and devices, lock and log flags); and the config `revision` to pass as expected_revision to write tools. A filter's scope is authoritative - its name may be generated text.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "include_filter_devices": {
+            "type": "boolean",
+            "default": false,
+            "description": "List every device of device-scoped filters instead of the first 10 (some filters are scoped to hundreds of devices)."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "explain_device",
+      "write": false,
+      "timeout_seconds": 15,
+      "description": "Why is (or isn't) a device's data in InfluxDB? For one device: its mode (excluded / all_states = included device / global_states = only the global include list), the measurement it is written to, whether a filter has locked it, and the time of its last point or heartbeat. For every key of the device: the current value, whether it is sent and why (always sent, device included, in the global include list, not included, or blocked by filter N), and each filter that applies with whether the current value passes it. Read-only; does not change what is written. Start here for 'why is there no history for X?'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Indigo device id (integer) or exact device name."
+          }
+        },
+        "required": [
+          "device"
+        ]
+      }
+    },
+    {
+      "name": "search_states",
+      "write": false,
+      "timeout_seconds": 15,
+      "description": "Find state keys and the devices that have them. With `query` (case-insensitive substring): matching keys with their device counts and whether each is in the global include list or always sent. With `state` (an exact key, e.g. 'sensorValue', 'state.hvac_state'): the devices that have it, its current value on each, and whether it is sent for that device and why. Give exactly one of query or state. Paginated with limit/offset.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Substring to search state keys for."
+          },
+          "state": {
+            "type": "string",
+            "description": "Exact state key whose devices to list."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50,
+            "description": "Maximum results (1-200)."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Results to skip, for paging."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "get_filter_blocks",
+      "write": false,
+      "timeout_seconds": 10,
+      "description": "The most recent values the data filters blocked from InfluxDB, newest first, parsed from the plugin's filter.log: time (minute), filter name, device, state, value (and previous value for percent-change filters), the reason, and whether the device was locked. Optionally only one device or one state. Use it to find filters that hide real data.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50,
+            "description": "Maximum entries (1-200)."
+          },
+          "device": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Indigo device id (integer) or exact device name."
+          },
+          "state": {
+            "type": "string",
+            "description": "Only entries for this state key."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "set_device_mode",
+      "write": true,
+      "timeout_seconds": 30,
+      "description": "Choose how devices are logged: 'excluded' (nothing is sent), 'all_states' (every state of the device is sent - can be dozens of keys), or 'default' (only the global include states). A device is in at most one list; this moves it. Up to 50 devices per call. Every write is validated, takes effect immediately without a plugin restart, is snapshotted first (list_snapshots / restore_snapshot undo it) and logs one line to the Indigo Event Log. The reply has revision, before, after (only what changed) and warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "Indigo device id or exact device name."
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Devices by id or exact name (up to 50)."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "default",
+              "all_states",
+              "excluded"
+            ],
+            "description": "default = only the global include states; all_states = every state; excluded = nothing."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return exactly what would change and save nothing. Dry-run first, show the result, then repeat with dry_run=false."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "description": "The revision get_config (or a previous write) returned; the call fails with a conflict if the configuration changed since."
+          }
+        },
+        "required": [
+          "devices",
+          "mode"
+        ]
+      }
+    },
+    {
+      "name": "update_included_states",
+      "write": true,
+      "timeout_seconds": 30,
+      "description": "Change the global include list - the state keys sent for every device that is neither included nor excluded. add / remove keys, or reset_to_defaults (applied first). A key must exist on at least one device unless allow_unknown=true (unknown keys get close-match suggestions). The always-sent fields (name, id, lastChanged, lastSuccessfulComm, secondsSince...) are refused: listing them would emit a point on every change. The list can't be emptied. The reply's affected_devices gives, per added or removed key, how many logged devices have it. Every write is validated, takes effect immediately without a plugin restart, is snapshotted first (list_snapshots / restore_snapshot undo it) and logs one line to the Indigo Event Log. The reply has revision, before, after (only what changed) and warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "State keys to add, e.g. 'sensorValue', 'state.hvac_state'."
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "State keys to remove."
+          },
+          "reset_to_defaults": {
+            "type": "boolean",
+            "default": false,
+            "description": "Start from the plugin's default include list (before add/remove)."
+          },
+          "allow_unknown": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow keys no device has right now (e.g. a device that is offline)."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return exactly what would change and save nothing. Dry-run first, show the result, then repeat with dry_run=false."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "description": "The revision get_config (or a previous write) returned; the call fails with a conflict if the configuration changed since."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "update_settings",
+      "write": true,
+      "timeout_seconds": 30,
+      "description": "Change the general settings: the minimum update frequency (how often an unchanged device or variable is re-sent so graphs don't gap: 5, 10, 15, 30, 60 minutes or 'disabled'), the retention period (InfluxDB 1.x only: 6, 12, 24, 60 months or 'forever'; applied to the server in the background), and the debug logging flags. Every write is validated, takes effect immediately without a plugin restart, is snapshotted first (list_snapshots / restore_snapshot undo it) and logs one line to the Indigo Event Log. The reply has revision, before, after (only what changed) and warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "minimum_update_frequency": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "enum": [
+              5,
+              10,
+              15,
+              30,
+              60,
+              "disabled"
+            ],
+            "description": "Minutes between heartbeats of unchanged values, or 'disabled'."
+          },
+          "retention": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "enum": [
+              6,
+              12,
+              24,
+              60,
+              "forever"
+            ],
+            "description": "Months of data InfluxDB 1.x keeps, or 'forever'."
+          },
+          "debug": {
+            "type": "object",
+            "description": "Debug flags to change, each true or false.",
+            "properties": {
+              "plugin": {
+                "type": "boolean",
+                "description": "Plugin debug."
+              },
+              "config": {
+                "type": "boolean",
+                "description": "Configuration debug."
+              },
+              "transport": {
+                "type": "boolean",
+                "description": "InfluxDB update decisions."
+              },
+              "transport_l2": {
+                "type": "boolean",
+                "description": "Update decisions, level 2 (very verbose)."
+              },
+              "json": {
+                "type": "boolean",
+                "description": "Full JSON of every update (very verbose)."
+              }
+            }
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return exactly what would change and save nothing. Dry-run first, show the result, then repeat with dry_run=false."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "description": "The revision get_config (or a previous write) returned; the call fails with a conflict if the configuration changed since."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "update_connection",
+      "write": true,
+      "timeout_seconds": 30,
+      "description": "Change (or, given the current values, just test) the InfluxDB connection: host, port, ssl, version ('1' = InfluxDB 1.7/1.8, '3' = InfluxDB 3 via its v1 API), database, user and password (on InfluxDB 3 the token is the password). Give only what changes. The new settings are validated, then TESTED (ping plus a write-permission check that writes no data) before they are saved; if the test fails the current settings stay in force and the error is returned, unless force=true. On success the plugin reconnects in the background. The password is write-only: it is never returned, logged or snapshotted, but setting it here passes it through this conversation and its model provider - set it in the plugin's config dialog instead if that matters. dry_run validates and shows the change without testing. Every write is validated, takes effect immediately without a plugin restart, is snapshotted first (list_snapshots / restore_snapshot undo it) and logs one line to the Indigo Event Log. The reply has revision, before, after (only what changed) and warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Host name or IP address only (no http://; use ssl)."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "HTTP API port."
+          },
+          "ssl": {
+            "type": "boolean",
+            "description": "Use https (certificates are verified)."
+          },
+          "version": {
+            "type": "string",
+            "enum": [
+              "1",
+              "3"
+            ],
+            "description": "'1' = InfluxDB 1.7/1.8, '3' = InfluxDB 3 (v1 compatibility API)."
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name."
+          },
+          "user": {
+            "type": "string",
+            "description": "User name."
+          },
+          "password": {
+            "type": "string",
+            "description": "Password, or the token on InfluxDB 3. Write-only."
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "Save even if the connection test fails."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return exactly what would change and save nothing. Dry-run first, show the result, then repeat with dry_run=false."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "description": "The revision get_config (or a previous write) returned; the call fails with a conflict if the configuration changed since."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "reconnect",
+      "write": true,
+      "timeout_seconds": 15,
+      "description": "Reconnect to InfluxDB with the current settings, clearing the stop left by an authorization failure (for example after the token was rotated on the server). Returns at once; the outcome shows up in get_status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "list_snapshots",
+      "write": false,
+      "timeout_seconds": 10,
+      "description": "The automatic configuration snapshots, newest first: the revision each one captured, when, what changed it (the tool, the config dialog, the filters dialog or housekeeping) and a one-line summary. Snapshots never contain the password. The last 20 are kept.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "restore_snapshot",
+      "write": true,
+      "timeout_seconds": 30,
+      "description": "Restore the configuration of a snapshot revision from list_snapshots: include states, included and excluded devices, filters and settings. Connection settings and the password are not restored (the reply says if the snapshot's differed). The restore is itself snapshotted, so it can be undone. Every write is validated, takes effect immediately without a plugin restart, is snapshotted first (list_snapshots / restore_snapshot undo it) and logs one line to the Indigo Event Log. The reply has revision, before, after (only what changed) and warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "description": "Snapshot revision from list_snapshots."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return exactly what would change and save nothing. Dry-run first, show the result, then repeat with dry_run=false."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "description": "The revision get_config (or a previous write) returned; the call fails with a conflict if the configuration changed since."
+          }
+        },
+        "required": [
+          "revision"
+        ]
+      }
+    },
+    {
+      "name": "create_filter",
+      "write": true,
+      "timeout_seconds": 30,
+      "description": "Data filters stop bad values from reaching InfluxDB. Filters are evaluated in order (position 1 first) and a value stops at the first filter it fails, so order decides which filter's lock and log settings apply. A filter only sees values that are sent (see explain_device). Create one: a min_max filter blocks numeric values outside [min, max]; a percent_changed filter blocks a value that differs from the last sent one by more than max_percent, and with lock_on_failure the device sends nothing until it reports a change. The reply's affected_devices shows how many logged devices have the state in scope and, for min_max, whose current values it would block. Every write is validated, takes effect immediately without a plugin restart, is snapshotted first (list_snapshots / restore_snapshot undo it) and logs one line to the Indigo Event Log. The reply has revision, before, after (only what changed) and warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "State key the filter checks, e.g. 'sensorValue' (see search_states)."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "min_max",
+              "percent_changed"
+            ],
+            "description": "min_max or percent_changed."
+          },
+          "min": {
+            "type": "number",
+            "description": "Lowest allowed value (min_max)."
+          },
+          "max": {
+            "type": "number",
+            "description": "Highest allowed value (min_max)."
+          },
+          "max_percent": {
+            "type": "number",
+            "description": "Largest allowed change in percent, greater than 0 (percent_changed)."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "devices",
+              "all_except"
+            ],
+            "description": "all = every device; devices = only `devices`; all_except = every device except `devices` (use it to exempt a device whose values are legitimately outside the range)."
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "maxItems": 500,
+            "description": "Devices by id or exact name, for scope devices / all_except (up to 500)."
+          },
+          "lock_on_failure": {
+            "type": "boolean",
+            "default": true,
+            "description": "percent_changed: after a block, send nothing for the device until it reports a change."
+          },
+          "log_to_event_log": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also log each block to the Indigo Event Log (blocks always go to filter.log)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name; omit or '' to have one generated from the settings (kept up to date)."
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Where to insert it (1 = first); default last."
+          },
+          "allow_unknown": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow a state no device has right now."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return exactly what would change and save nothing. Dry-run first, show the result, then repeat with dry_run=false."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "description": "The revision get_config (or a previous write) returned; the call fails with a conflict if the configuration changed since."
+          }
+        },
+        "required": [
+          "state",
+          "strategy"
+        ]
+      }
+    },
+    {
+      "name": "update_filter",
+      "write": true,
+      "timeout_seconds": 30,
+      "description": "Data filters stop bad values from reaching InfluxDB. Filters are evaluated in order (position 1 first) and a value stops at the first filter it fails, so order decides which filter's lock and log settings apply. A filter only sees values that are sent (see explain_device). Change the filter at `position`: give only what changes. expected_name (required) is the name get_config shows at that position: positions shift when filters are added or removed, and the call fails with a conflict if that position holds another filter. Changing scope starts a new device list (from `devices` / `add_devices`); add_devices / remove_devices edit the current list - e.g. exempt one device from an all-device filter with scope='all_except', devices=['That Device']. name='' switches to a generated name. new_position moves the filter. Every write is validated, takes effect immediately without a plugin restart, is snapshotted first (list_snapshots / restore_snapshot undo it) and logs one line to the Indigo Event Log. The reply has revision, before, after (only what changed) and warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The filter's position from get_config (1 = first)."
+          },
+          "expected_name": {
+            "type": "string",
+            "description": "The filter's current name, exactly as get_config shows it at that position (required: positions shift when filters change)."
+          },
+          "state": {
+            "type": "string",
+            "description": "New state key."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "min_max",
+              "percent_changed"
+            ],
+            "description": "New strategy (give its thresholds too)."
+          },
+          "min": {
+            "type": "number",
+            "description": "New lowest allowed value (min_max)."
+          },
+          "max": {
+            "type": "number",
+            "description": "New highest allowed value (min_max)."
+          },
+          "max_percent": {
+            "type": "number",
+            "description": "New largest allowed change in percent (percent_changed)."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "devices",
+              "all_except"
+            ],
+            "description": "all = every device; devices = only `devices`; all_except = every device except `devices` (use it to exempt a device whose values are legitimately outside the range)."
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "maxItems": 500,
+            "description": "Replace the scope's device list."
+          },
+          "add_devices": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "maxItems": 500,
+            "description": "Add devices to the scope's list."
+          },
+          "remove_devices": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "maxItems": 500,
+            "description": "Remove devices from the scope's list."
+          },
+          "lock_on_failure": {
+            "type": "boolean",
+            "description": "percent_changed: lock the device after a block."
+          },
+          "log_to_event_log": {
+            "type": "boolean",
+            "description": "Log each block to the Indigo Event Log."
+          },
+          "name": {
+            "type": "string",
+            "description": "New name; '' = generated from the settings."
+          },
+          "new_position": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Move the filter to this position."
+          },
+          "allow_unknown": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow a new state no device has right now."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return exactly what would change and save nothing. Dry-run first, show the result, then repeat with dry_run=false."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "description": "The revision get_config (or a previous write) returned; the call fails with a conflict if the configuration changed since."
+          }
+        },
+        "required": [
+          "position",
+          "expected_name"
+        ]
+      }
+    },
+    {
+      "name": "delete_filter",
+      "write": true,
+      "timeout_seconds": 30,
+      "description": "Delete the data filter at `position`. expected_name is required - the name get_config shows at that position - and the call fails with a conflict if that position now holds another filter. Every write is validated, takes effect immediately without a plugin restart, is snapshotted first (list_snapshots / restore_snapshot undo it) and logs one line to the Indigo Event Log. The reply has revision, before, after (only what changed) and warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The filter's position from get_config (1 = first)."
+          },
+          "expected_name": {
+            "type": "string",
+            "description": "The filter's current name, exactly as get_config shows it."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return exactly what would change and save nothing. Dry-run first, show the result, then repeat with dry_run=false."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "description": "The revision get_config (or a previous write) returned; the call fails with a conflict if the configuration changed since."
+          }
+        },
+        "required": [
+          "position",
+          "expected_name"
+        ]
+      }
+    }
+  ]
+}
