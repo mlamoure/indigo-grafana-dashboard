@@ -290,11 +290,15 @@ class InfluxClient:
 				pass
 		return info
 
-	def query(self, statement, database=None):
-		"""Run an InfluxQL statement (POST /query) and return its results list."""
+	def query(self, statement, database=None, epoch=None):
+		"""Run an InfluxQL statement (POST /query) and return its results list.
+		epoch ('s', 'ms', ...) returns times as integers in that unit instead of
+		RFC3339 strings."""
 		params = {'q': statement}
 		if database:
 			params['db'] = database
+		if epoch:
+			params['epoch'] = epoch
 		response = self._request('POST', 'query', expected=(200,), params=params)
 		try:
 			results = response.json().get('results', [])

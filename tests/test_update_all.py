@@ -75,7 +75,8 @@ def test_legacy_smart_frequency(make_plugin, stale, monkeypatch, hour, minute, e
     plugin.UpdateAll()
     plugin.variableLastUpdated[var.id] = old
 
-    fixed = datetime.datetime(2026, 10, 14, hour, minute)
+    # the day after `old` (two days ago), so the heartbeat is due whatever the real date
+    fixed = datetime.datetime.combine((old + datetime.timedelta(days=1)).date(), datetime.time(hour, minute))
 
     class FixedDateTime(datetime.datetime):
         @classmethod

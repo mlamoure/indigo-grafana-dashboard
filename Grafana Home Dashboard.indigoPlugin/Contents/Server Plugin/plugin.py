@@ -262,7 +262,7 @@ class Plugin(indigo.PluginBase):
 		self.BuildConfigurationLists()
 		self.pruneFilterBlocksEventLog()
 
-		# Tell the Indigo MCP Server (if installed) to read our
+		# Tell MCP Advanced Tools (if installed) to read our
 		# mcp-manifest.json.  Harmless no-op when nobody subscribes.
 		try:
 			indigo.server.broadcastToSubscribers("mcp_tools_updated")
@@ -1698,15 +1698,15 @@ class Plugin(indigo.PluginBase):
 
 		return valuesDict
 
-################### MCP tool provider (Indigo MCP Server plugin) ###################################
+################### MCP tool provider (MCP Advanced Tools plugin) ###################################
 
 	def handle_mcp_tool_invoke(self, action, dev=None, caller_waiting_for_result=True):
-		"""Called cross-plugin by the Indigo MCP Server (com.vtmikel.mcp_server)
+		"""Called cross-plugin by MCP Advanced Tools (com.vtmikel.mcp_server)
 		via executeAction.  The bare tool name and a JSON-string arguments
 		payload arrive in action.props; the reply is always a JSON-string
 		envelope (mcp_api.tool_dispatcher).  Everything under mcp_api/ is
 		imported lazily here, so a bug in tool code can never affect the plugin
-		for users without the MCP Server."""
+		for users without MCP Advanced Tools."""
 		try:
 			if self._tool_dispatcher is None:
 				from mcp_api.tool_dispatcher import ToolDispatcher

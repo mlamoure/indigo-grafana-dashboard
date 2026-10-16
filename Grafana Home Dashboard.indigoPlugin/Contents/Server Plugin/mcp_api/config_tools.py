@@ -2,10 +2,11 @@
 The influxlog_* tools: what the Grafana Home Dashboard plugin logs to InfluxDB,
 and why.  Advertised in Contents/Resources/mcp-manifest.json.
 
-Every tool reads the plugin's live state.  Nothing here writes to InfluxDB or
-reads time-series data (the MCP Server's history tools do that), and no output
-ever contains the InfluxDB password or token: the config store's plain form has
-no secrets, and the connection section reports only `password_set`.
+Every tool reads the plugin's live state, except query_history (history.py),
+which reads back the time series the plugin logged.  Nothing here writes to
+InfluxDB, and no output ever contains the InfluxDB password or token: the config
+store's plain form has no secrets, and the connection section reports only
+`password_set`.
 """
 
 import datetime
@@ -20,6 +21,7 @@ from influx_settings import (FREQUENCY_CHOICES, RETENTION_CHOICES, describe_rete
 
 from .errors import ToolError
 from .filter_log import read_records
+from .history import query_history as _query_history
 from .resolvers import device_ref, resolve_device, resolve_devices, suggestions
 from .tool_dispatcher import AsyncResult
 
@@ -80,7 +82,7 @@ def _int_arg(value, name, low, high, default):
 
 
 class InfluxLogTools:
-	TOOLS = ("get_status", "get_config", "explain_device", "search_states", "get_filter_blocks",
+	TOOLS = ("get_status", "get_config", "explain_device", "search_states", "get_filter_blocks", "query_history",
 			 "set_device_mode", "update_included_states", "update_settings", "update_connection", "reconnect",
 			 "list_snapshots", "restore_snapshot", "create_filter", "update_filter", "delete_filter")
 
@@ -322,6 +324,13 @@ class InfluxLogTools:
 										state=None if state is None else str(state))
 		return {"file": p.FilterLogFileLoc, "lines_scanned": scanned, "count": len(records),
 				"newest_first": True, "entries": records}
+
+	def query_history(self, devices=None, variables=None, states=None, hours=None, days=None, start=None, end=None,
+					  bucket=None, max_changes=None):
+		"""Read back what devices and variables did (history.py).  Validates here;
+		the queries run on a worker thread."""
+		return _query_history(self, devices=devices, variables=variables, states=states, hours=hours, days=days,
+							  start=start, end=end, bucket=bucket, max_changes=max_changes)
 
 	# ------------------------------------------------------------------
 	# write tools: inclusion, settings, connection (phase 2)

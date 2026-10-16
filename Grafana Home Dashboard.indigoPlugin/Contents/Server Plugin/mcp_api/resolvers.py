@@ -73,3 +73,23 @@ def resolve_devices(refs, path="devices", limit=None):
 def device_ref(dev_id):
 	"""{id, name} for output - the name next to every id."""
 	return {"id": int(dev_id), "name": device_name(dev_id)}
+
+
+def resolve_variable(ref, path="variable"):
+	"""An Indigo variable from an id (int or numeric string) or an exact name."""
+	if isinstance(ref, bool) or ref is None or (isinstance(ref, str) and not ref.strip()):
+		raise ToolError("validation", f"{path}: give a variable id or exact variable name")
+
+	if isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit()):
+		var_id = int(ref)
+		if var_id in indigo.variables:
+			return indigo.variables[var_id]
+		raise ToolError("not_found", f"{path}: no variable with id {var_id}")
+
+	name = str(ref).strip()
+	for var in indigo.variables:
+		if var.name == name:
+			return var
+	close = suggestions(name, [var.name for var in indigo.variables])
+	raise ToolError("not_found", f"{path}: no variable named {name!r}",
+					{"errors": [{"path": path, "message": f"unknown variable {name!r}"}], "did_you_mean": close})

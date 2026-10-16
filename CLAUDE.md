@@ -25,7 +25,7 @@ Grafana Home Dashboard.indigoPlugin/
 │       ├── influx_settings.py        # Settings validation shared by the dialog, connect() and tools
 │       ├── influx_filter.py          # InfluxFilter (data filter rule), prefs record and dict form
 │       ├── config_store.py           # ConfigStore: every configuration change goes through apply()
-│       ├── mcp_api/                  # MCP tool provider (influxlog_* tools), imported lazily
+│       ├── mcp_api/                  # MCP tool provider (influxlog_* tools), imported lazily; history.py = query_history
 │       ├── Actions.xml               # hidden mcp_tool_invoke action only
 │       ├── json_adaptor.py           # Converts Indigo objects to InfluxDB format
 │       ├── PluginConfig.xml          # Two-panel config UI (Connection + Inclusion/Exclusion)
@@ -77,6 +77,12 @@ The configuration still lives on the Plugin object (the write pipeline reads it 
 
 ### MCP tool provider (`mcp_api/`, #11)
 Contract: `docs/mcp-provider-manifest.md` in indigo-mcp-server. `Contents/Resources/mcp-manifest.json` (prefix `influxlog` → ContextForge `indigo-influxlog-*`), hidden action `mcp_tool_invoke` in `Actions.xml`, `handle_mcp_tool_invoke` imports `mcp_api` **lazily**, `broadcastToSubscribers("mcp_tools_updated")` at startup. `tests/test_mcp_manifest.py` keeps the manifest, `InfluxLogTools.TOOLS`, the handler signatures and Actions.xml in sync. Tools resolve devices by id or exact name (close-match suggestions), put the name next to every id, and use `adaptor.to_json` - **never `diff_to_json`**, which updates the change-detection cache. The InfluxDB password/token never appears in any output (`test_no_secret_anywhere` sweeps replies, log records and snapshot files).
+**`query_history` (`mcp_api/history.py`, 2026.12.0)** is the one tool that reads InfluxDB. `prepare()` validates and resolves on the callback thread; the queries run on an `InfluxToolWorker` thread (`AsyncResult`) with a **client of its own** (`newClient(settings)`, 20 s per request, 50 s budget per call; manifest timeout 60 s) - never the writer's session. Every InfluxQL statement is built in `HistoryReader` (epoch seconds; `"name"::tag` because 1.x stores the device name as tag *and* field); `tests/fake_influx.FakeHistoryClient` answers only those statement shapes and `tests/live/test_live_history.py` runs them on both servers - change all three together. Gotchas, verified live:
+- InfluxDB 3 (3.10-3.12) refuses a **double quote inside a string literal** ("invalid escape sequence"), so a name containing `"` (e.g. `TV 65"`) is matched with an anchored regex `=~ /^...$/`; InfluxDB 1.x keeps the encoder's escaped `\` as **two** backslashes in a tag, so 1.x lookups double them.
+- **Gaps are per device, never per state**: they come from the `id` field (on every device point; `value` for variables). An unchanged state is re-sent only on the heartbeat, and `deviceUpdated` restarts the heartbeat clock whenever *any* state was sent, so a quiet state on a busy device has hour-long holes that are not outages (a lamp's `onState` had 13 h without a point while the lamp wrote every 5 min).
+- 1.x reads every retention policy (`autogen` + `indigo_policy`) and merges; InfluxDB 3 has none (and `SHOW RETENTION POLICIES` is refused to a read token). Over `RAW_POINT_CAP` points a series falls back to InfluxDB aggregates (`mean_of_points`, no change list); the raw path's `mean` is time-weighted.
+- Read access: 401/403 on a read becomes a `conflict` naming the fix.
+
 Write tools go through `InfluxLogTools._write` → `store.apply` (dry_run, expected_revision, snapshot, one `MCP: <tool> <summary> (revision N)` INFO line). `update_connection` returns an `AsyncResult`: `handle_mcp_tool_invoke` takes `indigo.acquireCallbackCompleteHandler()` and finishes on an `InfluxToolWorker` thread, because its test-then-commit (`Plugin.testConnection`: ping + empty-write access check) does network I/O. A failed test leaves the settings in force unless `force`.
 
 ### json_adaptor.py
@@ -225,6 +231,11 @@ The data filtering system (`filterValues` menu item, `influx_filter.py`) is comp
 Include states missing from every device right now (a device offline) are kept, not pruned. Deleted devices are pruned from the include/exclude lists, the adaptor cache (keyed by device id, no size cap) and the heartbeat/lock dicts.
 
 ## Version History
+
+### v2026.12.0 (history tool)
+- `influxlog_query_history` (`mcp_api/history.py`): numbers, on/off and text states, time in state, buckets, per-device gaps, no-data reasons; devices, thermostats, weather stations and variables; 1.x retention policies merged
+- `InfluxClient.query(..., epoch=)`; `resolve_variable`
+- Test fix: `test_legacy_smart_frequency` no longer depends on the real date (it failed from 2026-10-16)
 
 ### v2026.11.0 (Own InfluxDB client + code-review fixes, issue #12)
 - Archived `influxdb` client replaced by `influx_client.py` on Indigo's `requests`; `Server Plugin/requirements.txt` removed. Encoder byte-identical to 5.3.2 except NaN/inf and field-less points skipped

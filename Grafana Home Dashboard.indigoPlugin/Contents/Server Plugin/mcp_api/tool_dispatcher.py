@@ -1,7 +1,7 @@
 """
 Dispatcher for the `mcp_tool_invoke` hidden action.
 
-The MCP Server plugin calls
+The MCP Advanced Tools plugin calls
 executeAction("mcp_tool_invoke", props={"tool": <name>, "arguments": <JSON string>})
 and receives a JSON string back. Arguments cross the boundary as a JSON
 string because indigo.Dict cannot carry None values or $-prefixed keys.

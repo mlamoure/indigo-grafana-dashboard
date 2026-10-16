@@ -120,6 +120,80 @@
       }
     },
     {
+      "name": "query_history",
+      "write": false,
+      "timeout_seconds": 60,
+      "description": "What did devices and variables do over a time window? Reads back the history this plugin logged to InfluxDB (devices, thermostats, weather stations and variables). Per state: numbers get current / first / min / max (with times) / time-weighted mean / change / trend (rising, falling, steady) and a flat-line warning with the last time the value differed; on/off and text states (door, lock, HVAC mode) get the value at the start of the window, the change list with times and the time spent in each value (lamp on 6h 12m, heating 3h 40m). bucket adds min / mean / max per 15 minutes, hour or day (or time in each value per bucket) for 'when was it coldest' and 'hours on per day' questions. Per device or variable, gaps lists the stretches longer than twice the minimum update frequency in which it wrote nothing at all (the device, the plugin or InfluxDB was silent); a single unchanged state is normally written only on that heartbeat, so a state's own points are no outage signal. A state with no data says why: device excluded, state not logged, value blocked by a data filter, device locked, plus the last value logged before the window. Window: the last `hours` or `days` (default 24 hours), or `start` / `end` (ISO 8601; no offset = the Indigo server's local time); at most 366 days. Without `states`, a device returns up to 6 of the states the plugin logs for it (search_states / explain_device list them). History is stored under the device's name at the time it was written. Read-only; needs credentials that can read the database, not only write to it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "maxItems": 5,
+            "description": "Up to 5 Indigo devices: id (integer) or exact name."
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "maxItems": 5,
+            "description": "Up to 5 Indigo variables: id (integer) or exact name. A variable's history is its value (value.num when it is numeric)."
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "description": "State keys to read for every device given, as logged: e.g. sensorValue, onState, brightness, heatSetpoint, state.hvac_state (a key without 'state.' is also tried with it). Omit for the device's logged states."
+          },
+          "hours": {
+            "type": "number",
+            "description": "Window length in hours (up to 8784). Default 24 when no window is given."
+          },
+          "days": {
+            "type": "number",
+            "description": "Window length in days (up to 366). Give hours or days, not both."
+          },
+          "start": {
+            "type": "string",
+            "description": "Window start, ISO 8601 (2026-10-15T02:00, 2026-10-15T02:00-04:00 or 2026-10-15). With hours/days and no end, the window runs from here."
+          },
+          "end": {
+            "type": "string",
+            "description": "Window end, ISO 8601; default now. With hours/days and no start, the window ends here."
+          },
+          "bucket": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "15m",
+              "hour",
+              "day"
+            ],
+            "description": "Add a series: min / mean / max per bucket for numbers, seconds in each value per bucket for on/off and text. Buckets start on the local hour / midnight; auto sizes them to the window (at most 200). Omit for no series."
+          },
+          "max_changes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Most changes listed per state (default 50; the newest are kept). For numbers the list is left out when there are more changes than this."
+          }
+        },
+        "required": []
+      }
+    },
+    {
       "name": "set_device_mode",
       "write": true,
       "timeout_seconds": 30,

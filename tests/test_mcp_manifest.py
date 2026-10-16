@@ -21,6 +21,7 @@ EXPECTED = {
     'explain_device': (False, 15),
     'search_states': (False, 15),
     'get_filter_blocks': (False, 10),
+    'query_history': (False, 60),
     'set_device_mode': (True, 30),
     'update_included_states': (True, 30),
     'update_settings': (True, 30),

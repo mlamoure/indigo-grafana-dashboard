@@ -27,7 +27,7 @@ An Indigo plugin that logs device and variable states to InfluxDB for visualizat
   - Download: https://portal.influxdata.com/downloads/
 * **or InfluxDB 3** (Core/Enterprise) reached through its v1 compatibility API
   - Select "InfluxDB 3" in the plugin's InfluxDB Version dropdown
-  - The credentials/token must have write access to the database — the plugin does not create databases or retention policies on InfluxDB 3 (retention is managed server-side; InfluxDB 3 creates a missing database on the first write when the token allows it)
+  - The credentials/token must have write access to the database (and read access too for the AI history tool, [`influxlog_query_history`](#history-influxlog_query_history)) — the plugin does not create databases or retention policies on InfluxDB 3 (retention is managed server-side; InfluxDB 3 creates a missing database on the first write when the token allows it)
   - For token auth, leave the username as configured on your server and supply the token as the password (v1-compat convention)
 * **Grafana** (for visualization, optional but recommended)
   - Docker: `docker run -p 3000:3000 grafana/grafana`
@@ -116,9 +116,9 @@ Utility tools to help you understand what data is available:
 
 Access via: **Plugins → Grafana Home Dashboard → Explore device/state**
 
-## AI Configuration (Indigo MCP Server)
+## AI Configuration (MCP Advanced Tools)
 
-With the [Indigo MCP Server](https://github.com/mlamoure/indigo-mcp-server) plugin (2026.8.1 or later) installed, an AI assistant can read and change what this plugin logs. The plugin contributes tools prefixed `influxlog_`; nothing changes for users without the MCP Server.
+With the [MCP Advanced Tools](https://github.com/mlamoure/indigo-mcp-server) plugin (formerly MCP Server; 2026.8.1 or later) installed, an AI assistant can read and change what this plugin logs. The plugin contributes tools prefixed `influxlog_`; nothing changes for users without MCP Advanced Tools.
 
 | Tool | What it does |
 |---|---|
@@ -127,6 +127,7 @@ With the [Indigo MCP Server](https://github.com/mlamoure/indigo-mcp-server) plug
 | `influxlog_explain_device` | For one device: which of its states are sent and why, which filters apply and whether the current value passes them |
 | `influxlog_search_states` | Find state keys, or the devices that have a given state and whether it is sent for each |
 | `influxlog_get_filter_blocks` | The latest values the filters blocked, parsed from `filter.log` |
+| `influxlog_query_history` | What devices and variables did over a time window, read back from InfluxDB (see [History](#history-influxlog_query_history)) |
 | `influxlog_set_device_mode` | Exclude a device, include all its states, or return it to the global include list |
 | `influxlog_update_included_states` | Add or remove global include states, or reset them to the defaults |
 | `influxlog_update_settings` | Minimum update frequency, retention (InfluxDB 1.x), debug flags |
@@ -135,9 +136,24 @@ With the [Indigo MCP Server](https://github.com/mlamoure/indigo-mcp-server) plug
 | `influxlog_list_snapshots` / `influxlog_restore_snapshot` | Undo: every change is snapshotted first |
 | `influxlog_create_filter` / `influxlog_update_filter` / `influxlog_delete_filter` | Manage the data filters, including the "all devices except" scope; a filter is addressed by its position plus its expected name, so a filter that moved is never changed by mistake |
 
-Every change made through a tool can be dry-run first and can be checked against the configuration revision the AI read (`expected_revision`, so it can't overwrite a change it hasn't seen); it takes effect immediately, is snapshotted (the last 20 are kept, in `Preferences/Plugins/com.vtmikel.grafana.snapshots/` in the Indigo folder) and is recorded with one line in the Indigo Event Log (`MCP: ...`). The MCP Server's "Allow plugin-provided tools to make changes" setting switches all of them off.
+Every change made through a tool can be dry-run first and can be checked against the configuration revision the AI read (`expected_revision`, so it can't overwrite a change it hasn't seen); it takes effect immediately, is snapshotted (the last 20 are kept, in `Preferences/Plugins/com.vtmikel.grafana.snapshots/` in the Indigo folder) and is recorded with one line in the Indigo Event Log (`MCP: ...`). MCP Advanced Tools's "Allow plugin-provided tools to make changes" setting switches all of them off.
 
 **The password/token** is write-only: no tool returns it and it is never logged or snapshotted. A connection change is tested (ping and a write-permission check that writes no data) before it is saved, and a failing test leaves the working settings in place. Setting the password through a tool does pass it through the AI conversation and its model provider; set it in the plugin's config dialog instead if that matters to you.
+
+### History (`influxlog_query_history`)
+
+Reads back what the plugin logged, so an AI assistant can answer "how cold did the porch get last night?", "how many hours was the heat on each day this week?" or "when did the garage door open?". It only reads.
+
+* **What it covers**: devices (`device_changes`), thermostats (`thermostat_changes`), weather stations (`weather_changes`) and variables (`variable_changes`) - up to 5 devices and 5 variables per call
+* **Numbers** (temperatures, setpoints, power): current, first, minimum and maximum with the times they happened, the time-weighted mean, the change and the trend (rising / falling / steady), and a warning when the value never moved in the window, with the last time it was different - a sign of a stuck or offline sensor
+* **On/off and text states** (lights, doors, locks, HVAC mode, variables): the value at the start of the window, every change with its time, and the time spent in each value
+* **Over time** (optional `bucket`): minimum / mean / maximum per 15 minutes, hour or day for numbers, or the time in each value per bucket ("hours on per day"); hour and day buckets start on the Indigo server's local hour and midnight
+* **Outages**: per device or variable, the stretches longer than twice the minimum update frequency in which nothing at all was written (the device, the plugin or InfluxDB was silent). A single state that doesn't change is normally written only on that heartbeat, and every change of another state postpones it, so the tool never reads a quiet state as an outage
+* **No data**: says why - the device is excluded, the state isn't in the include list, a data filter blocks its value, the device is locked - and gives the last value logged before the window
+* **Window**: the last hours or days (default 24 hours), or a start and end time, up to 366 days. Without a list of states, a device returns up to six of the states the plugin logs for it
+* **InfluxDB 1.x**: data in both `autogen` and `indigo_policy` (see [Retention on InfluxDB 1.x](#retention-on-influxdb-1x)) is read and merged
+
+The credentials in the plugin's connection settings must be allowed to **read** the database as well as write to it: an InfluxDB 1.x user with `ALL` privileges on it (not only `WRITE`), or an InfluxDB 3 token with read and write on it. With write-only credentials the tool says so and logging is unaffected. History is stored under a device's name at the time it was written, so after a rename the older history is under the old name.
 
 ## Grafana Dashboard Setup
 
@@ -239,6 +255,11 @@ simply omit these fields rather than reporting as maximally stale.
 
 ## Version History
 
+### v2026.12.0 (History for AI assistants)
+Tested against InfluxDB 1.8.10 and InfluxDB 3 Core 3.12.0.
+
+- **New**: `influxlog_query_history` reads back what devices and variables did over a time window - numbers with their minimum, maximum, mean and trend, on/off and text states with their changes and the time in each value, optional per-hour or per-day series, outages, and why a state has no data (see [History](#history-influxlog_query_history)). It needs credentials that can read the database as well as write to it; everything else works as before without them
+
 ### v2026.11.0 (Own InfluxDB client + fixes)
 Tested against InfluxDB 1.8.10 and InfluxDB 3 Core 3.12.0.
 
@@ -261,7 +282,7 @@ Tested against InfluxDB 1.8.10 and InfluxDB 3 Core 3.12.0.
 - **Fixed**: the change-detection cache was capped below the size of a large Indigo database, re-sending unchanged states
 - **Changed**: a locked device is logged when it is locked and when it is released, instead of every minute; much less debug output in `plugin.log`
 - **Removed**: settings left over from plugin version 2.x, including a stored Grafana admin password
-- **New**: AI configuration through the Indigo MCP Server: 15 `influxlog_*` tools (see [AI Configuration](#ai-configuration-indigo-mcp-server))
+- **New**: AI configuration through the Indigo MCP Server: 15 `influxlog_*` tools (see [AI Configuration](#ai-configuration-mcp-advanced-tools))
 - **New**: filters can apply to "all devices except" the ones you pick (stored with the existing filter format, so going back to an older release keeps every filter; an "all devices except" filter then applies to all devices again)
 - **Changed**: if the configuration changes elsewhere (for example through an MCP tool) while the plugin config dialog is open, saving the dialog applies your changes on top instead of overwriting the other ones
 

@@ -23,7 +23,7 @@ NEW_SECRET = 'apiv3_NEW-token-value'
 
 
 def invoke(plugin, tool, **arguments):
-    """Call a tool the way the MCP Server does; wait for async replies."""
+    """Call a tool the way MCP Advanced Tools does; wait for async replies."""
     action = types.SimpleNamespace(props={'tool': tool, 'arguments': json.dumps(arguments)})
     import indigo
     before = len(indigo.completion_handlers)
