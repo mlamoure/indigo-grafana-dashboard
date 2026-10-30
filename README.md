@@ -255,6 +255,11 @@ simply omit these fields rather than reporting as maximally stale.
 
 ## Version History
 
+### v2026.12.1 (Stable release)
+Tested against InfluxDB 1.8.10 and InfluxDB 3 Core 3.12.0.
+
+- **Stable release** of the 2026.12.0 beta, alongside the Indigo 2026.1 release and MCP Advanced Tools 2026.11.2. No code changes since 2026.12.0
+
 ### v2026.12.0 (History for AI assistants)
 Tested against InfluxDB 1.8.10 and InfluxDB 3 Core 3.12.0.
 
