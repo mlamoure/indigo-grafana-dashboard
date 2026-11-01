@@ -33,6 +33,19 @@ TYPE_CONVERTERS = {
 	'boolean': to_bool
 }
 
+# The Python type each converter produces: a typecached key whose value is not of
+# this type could not be converted (e.g. '' for a float column), and InfluxDB
+# would refuse the whole point over it.
+TYPE_RESULTS = {
+	'int': int,
+	'integer': int,
+	'str': str,
+	'string': str,
+	'float': float,
+	'bool': bool,
+	'boolean': bool
+}
+
 # Device liveness markers, emitted on every device point by diff_to_json() so that
 # a flat line from a DEAD device is distinguishable from a flat line from a merely
 # QUIET one.  Each pair is (indigo attribute, derived age field): the absolute
@@ -94,6 +107,12 @@ class JSONAdaptor():
 
 	def forget(self, device_id):
 		self.cache.pop(device_id, None)
+
+	def fits_column(self, key, value):
+		"""False when InfluxDB has told us key's column type (the typecache) and
+		value is not of it: to_json() tried to convert it and could not."""
+		expected = TYPE_RESULTS.get(self.typecache.get(key))
+		return expected is None or type(value) is expected
 
 	def prune_cache(self, device_ids):
 		"""Drop cache entries for devices that no longer exist."""
@@ -207,7 +226,8 @@ class JSONAdaptor():
 					try:
 						newjson[key] = converter(str(newjson[key]))
 					except (ValueError, TypeError):
-						self.logger.debug('One of the columns just will not convert to the requested type. Partial record written.')
+						# left as it is: diff_to_json() leaves it out (fits_column)
+						pass
 					except Exception as e:
 						self.logger.debug('Unknown problem.  Partial record written.  Error:' + str(e))
 				else:
@@ -240,6 +260,13 @@ class JSONAdaptor():
 
 				# either the key is in the include states, the entire device needs to be sent
 				if includeAll or kk in includeSet:
+					if not self.fits_column(kk, vv):
+						# a value the column's type can't hold (a float state reported
+						# as ''): leave this key out rather than have InfluxDB refuse
+						# the whole point.  The cache below still records it as last
+						# seen, so the next real value is a change and is sent at once.
+						self.logger.debug(f"not sending {kk} for device {device.name}: {vv!r} is not a {self.typecache[kk]}, the type of its InfluxDB column")
+						continue
 					if not isinstance(vv, indigo.Dict) and not isinstance(vv, dict):
 						diffjson[kk] = vv
 

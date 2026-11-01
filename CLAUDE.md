@@ -90,6 +90,7 @@ Converts Indigo device objects to InfluxDB-compatible JSON format:
 - Smart type conversion (strings → floats where possible)
 - Datetime → Unix timestamps
 - Enum → string conversion
+- Typecache (column types learned from InfluxDB type-conflict errors): `to_json` converts typecached keys; a key it could not convert is left out of the point by `diff_to_json` (`fits_column`), the rest is written
 - Caching to reduce redundant writes. **This cache is "last seen", not "last written"** — it is updated with the full device *before* `DeviceToInflux`'s filter loop runs, so it records values the filters then block. Never use it as a filter baseline.
 - Device liveness fields (`lastChanged`, `lastSuccessfulComm`, `secondsSince*`), emitted on every device point
 
@@ -135,7 +136,7 @@ Writes are asynchronous: producers (`deviceUpdated`, `variableUpdated`, `UpdateA
 **Error classification (2026.11.0, `writeBatch`)** - by HTTP status, never by retrying point by point first:
 - **401/403** → credentials refused: `onAuthFailure` (ERROR once, `StopConnectionAttempts`), batch kept, producers stop (`acceptingPoints()` false) until the settings change.
 - **404 / 5xx / network** → transient: batch kept, `markDisconnected` → reconnect worker; the writer **pauses** (never drains the queue) while disconnected, and producers keep buffering into the 10,000-point queue once a connection has been made. A batch failing `MAX_BATCH_ATTEMPTS` times is dropped (`gave_up`).
-- **400** → data problem: type conflicts are corrected from the **decoded** message (1.x `input field "x" ... already exists as type y`; 3 `column 'x', expected iox::column_type::field::y`) and the typecache learns. 1.x `partial write` means the valid points were stored (only re-send points with the corrected field). InfluxDB 3 rejects the whole batch and names the first bad line → drop that point, retry the rest. Only a 1.x whole-batch 400 without a line falls back to per-point.
+- **400** → data problem: type conflicts are corrected from the **decoded** message (1.x `input field "x" ... already exists as type y`; 3 `column 'x', expected iox::column_type::field::y`) and the typecache learns. 1.x `partial write` means the valid points were stored (only re-send points with the corrected field). InfluxDB 3 rejects the whole batch and names the first bad line → drop that point, retry the rest. A value that **can't** be converted to the column's type (`''` for a float, issue unraid-scripts-configs#46) is removed from its point, not the point dropped (`applyTypeCorrection` returns the changed points; 1.x re-sends only those); after that `diff_to_json` leaves such a key out up front (`JSONAdaptor.fits_column`). Only a 1.x whole-batch 400 without a line falls back to per-point.
 
 **InfluxDB 1.x retention (decision 2026-10-14)**: `indigo_policy` is created as the database **DEFAULT** only on a database the plugin itself just created (`createDatabase` compares `SHOW DATABASES` before its `CREATE DATABASE`); ALTERed when it is the default and the duration differs; `-1` = `INF`. Every other database is left alone with one WARNING and the opt-in command: an install from before 2026.11.0 (non-default `indigo_policy`, data in `autogen`) gets `ALTER ... DEFAULT`, a pre-existing database without the policy (possibly shared with other writers) gets `CREATE ... DEFAULT`. Switching a default would hide history from Grafana panels that don't name a policy and put other writers' data on this plugin's schedule. `CREATE DATABASE` and retention are best effort (non-admin users connect fine).
 
@@ -177,7 +178,7 @@ tests/live/run_influx_matrix.sh         # live influxdb:1.8 + influxdb:3-core ma
     "Grafana Home Dashboard.indigoPlugin" /home/mike/programming/indigo-grafana-dashboard
 ssh mike@indigo.home.mikelamoureux.net 'bash -c "/usr/local/indigo/indigo-restart-plugin com.vtmikel.grafana"'
 ```
-Check `/Library/Application Support/Perceptive Automation/Indigo 2025.2/Logs/com.vtmikel.grafana/plugin.log` afterwards.
+Check `/Library/Application Support/Perceptive Automation/Indigo <version>/Logs/com.vtmikel.grafana/plugin.log` afterwards (production runs Indigo 2026.1).
 
 ### Releasing
 Merge on Gitea first, pass the live matrix, then (the first argument is the **clone's folder name**):
@@ -231,6 +232,9 @@ The data filtering system (`filterValues` menu item, `influx_filter.py`) is comp
 Include states missing from every device right now (a device offline) are kept, not pruned. Deleted devices are pruned from the include/exclude lists, the adaptor cache (keyed by device id, no size cap) and the heartbeat/lock dicts.
 
 ## Version History
+
+### v2026.12.2 (unconvertible values)
+- A value its column type can't hold (`''` for a float) costs only that field, not the point: `applyTypeCorrection` removes it, `diff_to_json` leaves it out once typecached (issue unraid-scripts-configs#46: `state.gps_accuracy` of a Home Assistant location device, every 2 h)
 
 ### v2026.12.0 (history tool)
 - `influxlog_query_history` (`mcp_api/history.py`): numbers, on/off and text states, time in state, buckets, per-device gaps, no-data reasons; devices, thermostats, weather stations and variables; 1.x retention policies merged

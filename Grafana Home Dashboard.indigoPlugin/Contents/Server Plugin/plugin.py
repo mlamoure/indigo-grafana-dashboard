@@ -916,15 +916,21 @@ class Plugin(indigo.PluginBase):
 				# "partial write"; InfluxDB 3 rejects the whole batch and names the
 				# first bad line
 				partial = 'partial write' in e.message
-				corrected = None
+				corrected = []
 				if corrections < MAX_INFLUX_WRITE_RETRIES:
 					corrected = self.applyTypeCorrection(e, points)
 
 				if corrected:
 					corrections += 1
 					if partial:
-						# only the points carrying the corrected field were dropped
-						points = [point for point in points if corrected in point.get('fields', {})]
+						# only the points with the conflicting field were dropped
+						points = corrected
+					# a point whose only field could not be converted has nothing left
+					empty = [point for point in points if not point.get('fields')]
+					if empty:
+						for point in empty:
+							self.dropPoint(point, e)
+						points = [point for point in points if point.get('fields')]
 					continue
 
 				if partial:
@@ -959,7 +965,9 @@ class Plugin(indigo.PluginBase):
 
 	# parse a type-conflict error (InfluxDB 1.x or 3 v1-compat formats), teach
 	# the adaptor's typecache, and coerce the offending field across the batch.
-	# Returns the field name when at least one value changed, else None.
+	# A value that can't be converted (e.g. '' for a float column) is removed
+	# from its point instead, so the point's other fields are still written.
+	# Returns the points that changed (empty when none did).
 	def applyTypeCorrection(self, error, batch):
 		field = None
 		target = None
@@ -983,31 +991,36 @@ class Plugin(indigo.PluginBase):
 
 		if not field or not target:
 			self.logger.debug("Could not parse InfluxDB error response: " + error_text[:300])
-			return None
+			return []
 
 		converter = TYPE_CONVERTERS.get(target)
 		if converter is None:
 			self.logger.debug(f"Unknown type converter requested: {target}")
-			return None
+			return []
 
 		# Store the type for future reference so to_json() coerces up-front
 		if self.adaptor is not None:
 			self.adaptor.typecache[field] = target
 
-		changed = False
+		changed = []
 		for point in batch:
 			fields = point.get('fields', {})
-			if field in fields:
-				try:
-					value = fields[field]
-					converted = converter(str(value))
-					if type(converted) is not type(value) or converted != value:
-						fields[field] = converted
-						changed = True
-				except (ValueError, TypeError) as conv_err:
-					self.logger.debug(f"Could not convert field {field} to {target}: {conv_err}")
+			if field not in fields:
+				continue
+			value = fields[field]
+			try:
+				converted = converter(str(value))
+			except (ValueError, TypeError) as conv_err:
+				del fields[field]
+				changed.append(point)
+				self.logger.debug(f"leaving {field} out of a point for {point.get('tags', {})}: {value!r} is not a {target}, "
+								  f"the type of its InfluxDB column ({conv_err})")
+				continue
+			if type(converted) is not type(value) or converted != value:
+				fields[field] = converted
+				changed.append(point)
 
-		return field if changed else None
+		return changed
 
 ################### Main loop and device processing #############################################
 

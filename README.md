@@ -255,6 +255,11 @@ simply omit these fields rather than reporting as maximally stale.
 
 ## Version History
 
+### v2026.12.2 (Fix)
+Tested against InfluxDB 1.8.10 and InfluxDB 3 Core 3.12.0.
+
+- **Fixed**: a state whose value its InfluxDB column can't hold - typically a number column that a device sometimes reports as an empty string - cost the whole point, so the device's other changed states (and its liveness fields) were dropped with it each time. The value is now converted to the column's type when it can be, and otherwise only that state is left out of the point (logged at debug level)
+
 ### v2026.12.1 (Stable release)
 Tested against InfluxDB 1.8.10 and InfluxDB 3 Core 3.12.0.
 

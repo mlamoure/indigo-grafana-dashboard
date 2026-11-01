@@ -81,3 +81,35 @@ def test_liveness_fields_ride_along():
     diff = a.diff_to_json(dev, ['sensorValue'], False)
     assert 'secondsSinceLastSuccessfulComm' in diff
     assert diff['name'] == 'Lamp' and diff['id'] == float(dev.id)
+
+
+def test_value_its_column_type_cannot_hold_is_left_out():
+    """Issue unraid-scripts-configs#46: once InfluxDB has said a column is a float, a
+    state reported as '' is left out of the point instead of costing the whole point."""
+    a = adaptor()
+    a.typecache['state.gps_accuracy'] = 'float'
+    dev = FakeDevice("Car", states={'gps_accuracy': 3.0, 'latitude': 42.2})
+    assert a.diff_to_json(dev, None, True)['state.gps_accuracy'] == 3.0
+
+    dev.states = {'gps_accuracy': '', 'latitude': 42.3}
+    diff = a.diff_to_json(dev, None, True)
+    assert 'state.gps_accuracy' not in diff
+    assert diff['state.latitude'] == 42.3
+
+    # a value that converts is sent as the column's type
+    dev.states = {'gps_accuracy': '5', 'latitude': 42.3}
+    assert a.diff_to_json(dev, None, True)['state.gps_accuracy'] == 5.0
+
+    # only the unwritable value changed: no point at all
+    dev.states = {'gps_accuracy': '', 'latitude': 42.3}
+    assert a.diff_to_json(dev, None, True) is None
+    # a new number after it is sent at once, not at the next heartbeat
+    dev.states = {'gps_accuracy': 4.0, 'latitude': 42.3}
+    assert a.diff_to_json(dev, None, True)['state.gps_accuracy'] == 4.0
+
+
+def test_string_columns_take_any_value():
+    a = adaptor()
+    a.typecache['status'] = 'str'
+    dev = FakeDevice("Lamp", status=5.0)
+    assert a.diff_to_json(dev, ['status'], False)['status'] == '5.0'

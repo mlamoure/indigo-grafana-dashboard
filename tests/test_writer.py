@@ -12,8 +12,8 @@ import time
 import pytest
 
 import plugin as plugin_module
-from fake_influx import (FakeInfluxClient, InfluxConnectionError, V1_CONFLICT, V3_CONFLICT, V3_TAG_AND_FIELD,
-                         connected_plugin, http_error)
+from fake_influx import (FakeInfluxClient, InfluxConnectionError, V1_CONFLICT, V1_FLOAT_CONFLICT, V3_CONFLICT,
+                         V3_FLOAT_CONFLICT, V3_TAG_AND_FIELD, connected_plugin, http_error)
 from plugin import WRITE_HALT, WRITE_OK, WRITE_RETRY
 
 
@@ -98,6 +98,49 @@ def test_v3_type_conflict_is_corrected_and_whole_batch_resent(setup):
 
     assert client.writes[1] == [point('thermo', sensorValue='69.5'), point('lamp', onState=True)]
     assert plugin.adaptor.typecache['sensorValue'] == 'str'
+
+
+def gps_point(device, accuracy):
+    return point(device, **{'id': 1.0, 'state.latitude': 42.2, 'state.gps_accuracy': accuracy})
+
+
+def test_v3_unconvertible_value_leaves_only_that_field_out(setup):
+    """Issue unraid-scripts-configs#46: a float state reported as '' made InfluxDB 3
+    refuse the point, and the whole point (latitude, longitude, ...) was dropped
+    every time.  A value that converts is coerced; one that can't is left out."""
+    plugin, client, _ = setup(InfluxVersion='3')
+    client.write_errors = [http_error(400, V3_FLOAT_CONFLICT, point_index=0, line_number=1), None]
+    batch = [gps_point('car', ''), gps_point('phone', '5'), point('lamp', onState=True)]
+
+    assert plugin.writeBatch(client, batch) == WRITE_OK
+
+    assert client.writes[1] == [point('car', **{'id': 1.0, 'state.latitude': 42.2}),
+                                gps_point('phone', 5.0), point('lamp', onState=True)]
+    assert plugin.adaptor.typecache['state.gps_accuracy'] == 'float'
+    assert plugin.stats.snapshot()['points_dropped']['rejected'] == 0
+
+
+def test_v1_unconvertible_value_resends_the_point_without_it(setup):
+    plugin, client, _ = setup()
+    client.write_errors = [http_error(400, V1_FLOAT_CONFLICT), None]
+    batch = [gps_point('car', ''), gps_point('phone', 3.0)]
+
+    assert plugin.writeBatch(client, batch) == WRITE_OK
+
+    # 1.x stored the phone's point; only the car's is re-sent, minus the bad field
+    assert client.writes[1] == [point('car', **{'id': 1.0, 'state.latitude': 42.2})]
+    assert plugin.stats.snapshot()['points_dropped']['rejected'] == 0
+
+
+def test_point_left_without_fields_is_dropped(setup):
+    plugin, client, _ = setup(InfluxVersion='3')
+    client.write_errors = [http_error(400, V3_FLOAT_CONFLICT, point_index=0, line_number=1), None]
+    batch = [point('car', **{'state.gps_accuracy': ''}), point('lamp', onState=True)]
+
+    assert plugin.writeBatch(client, batch) == WRITE_OK
+
+    assert client.writes[1] == [point('lamp', onState=True)]
+    assert plugin.stats.snapshot()['points_dropped']['rejected'] == 1
 
 
 def test_v3_uncorrectable_line_is_dropped_by_line_number(setup):

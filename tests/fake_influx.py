@@ -9,6 +9,10 @@ V1_CONFLICT = ('partial write: field type conflict: input field "sensorValue" on
                'is type float, already exists as type string dropped=1')
 V3_CONFLICT = ("line protocol parsing error: invalid column type for column 'sensorValue', expected "
                "iox::column_type::field::string, got iox::column_type::field::float")
+V3_FLOAT_CONFLICT = ("line protocol parsing error: invalid column type for column 'state.gps_accuracy', expected "
+                     "iox::column_type::field::float, got iox::column_type::field::string")
+V1_FLOAT_CONFLICT = ('partial write: field type conflict: input field "state.gps_accuracy" on measurement "device_changes" '
+                     'is type string, already exists as type float dropped=1')
 V3_TAG_AND_FIELD = "line protocol parsing error: invalid line protocol - 'name' is used as both a tag and a field"
 
 

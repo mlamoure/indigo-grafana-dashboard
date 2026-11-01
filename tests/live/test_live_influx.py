@@ -260,6 +260,39 @@ def test_type_conflict_is_recovered(make_plugin, server):
     assert plugin.stats.snapshot()['points_dropped']['rejected'] == 0
 
 
+@pytest.mark.parametrize("server", ['1.8', '3'])
+def test_unconvertible_value_costs_only_its_field(make_plugin, server):
+    """unraid-scripts-configs#46: a float state reported as '' cost the whole point."""
+    measurement = unique('unconvertible')
+    if server == '1.8':
+        database = unique('igd_unconv')
+        admin18().create_database(database)
+        prefs = dict(InfluxHTTPPort=str(PORT_18), InfluxUser=ADMIN[0], InfluxPassword=ADMIN[1], InfluxVersion='1')
+        reader = admin18()
+    else:
+        database = V3_DB
+        prefs = dict(InfluxHTTPPort=str(PORT_3), InfluxUser='indigo', InfluxPassword=TOKEN_3, InfluxVersion='3')
+        reader = client3(database)
+    plugin = make_plugin(InfluxHost='127.0.0.1', InfluxDB=database, **prefs)
+    plugin.connect()
+    assert plugin.connected, plugin.lastConnectError
+
+    now = datetime.datetime.now(UTC)
+    plugin.connection.write_points([{'measurement': measurement, 'tags': {'name': 'Car'},
+                                     'fields': {'gps_accuracy': 3.0, 'latitude': 42.0}, 'time': now}])
+    batch = [{'measurement': measurement, 'tags': {'name': 'Car'},
+              'fields': {'gps_accuracy': '', 'latitude': 42.1}, 'time': now + datetime.timedelta(seconds=1)},
+             {'measurement': measurement, 'tags': {'name': 'Phone'},
+              'fields': {'gps_accuracy': '7', 'latitude': 42.2}, 'time': now + datetime.timedelta(seconds=2)}]
+
+    assert plugin.writeBatch(plugin.connection, batch) == WRITE_OK
+
+    assert field_types(reader, database, measurement)['gps_accuracy'] == 'float'
+    assert count(reader, database, measurement, 'latitude') == 3
+    assert count(reader, database, measurement, 'gps_accuracy') == 2  # the seed and the Phone's 7.0
+    assert plugin.stats.snapshot()['points_dropped']['rejected'] == 0
+
+
 def test_v3_bad_line_is_dropped_and_the_rest_written(make_plugin):
     database, measurement = V3_DB, unique('badline')
     plugin = make_plugin(InfluxHost='127.0.0.1', InfluxHTTPPort=str(PORT_3), InfluxUser='indigo',
